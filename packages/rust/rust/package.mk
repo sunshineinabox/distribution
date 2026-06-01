@@ -60,6 +60,7 @@ submodules = false
 docs = false
 profiler = true
 vendor = true
+tools = []
 
 rustc = "${PKG_BUILD}/rust-snapshot/bin/rustc"
 cargo = "${PKG_BUILD}/rust-snapshot/bin/cargo"
@@ -117,15 +118,15 @@ make_host() {
   export HOST_CMAKE="${TOOLCHAIN}/bin/cmake"
   export HOST_CMAKE_TOOLCHAIN_FILE="${CMAKE_CONF}"
 
-  python3 src/bootstrap/bootstrap.py -j ${CONCURRENCY_MAKE_LEVEL} build --stage 2 --verbose
+  python3 src/bootstrap/bootstrap.py -j ${CONCURRENCY_MAKE_LEVEL} build --stage 1 --verbose
 }
 
 makeinstall_host() {
   mkdir -p ${TOOLCHAIN}/bin
-    cp -a build/${RUST_HOST}/stage2/bin/* ${TOOLCHAIN}/bin
+    cp -a build/${RUST_HOST}/stage1/bin/* ${TOOLCHAIN}/bin
 
   mkdir -p ${TOOLCHAIN}/lib/rustlib
-    cp -a build/${RUST_HOST}/stage2/lib/* ${TOOLCHAIN}/lib
+    cp -a build/${RUST_HOST}/stage1/lib/* ${TOOLCHAIN}/lib
 
     cp -a ${PKG_BUILD}/targets/*.json ${TOOLCHAIN}/lib/rustlib/
 }

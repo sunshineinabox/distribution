@@ -3,6 +3,9 @@
 
 PKG_SOC="${DEVICE/RK/rk}"
 
+# Pre-built rkbin tools are x86_64 binaries; on aarch64 hosts QEMU needs this to find libc.
+if [ "$(uname -m)" = "aarch64" ]; then export QEMU_LD_PREFIX=/usr/x86_64-linux-gnu; fi
+
 # Make idbloader.img
 case "${DEVICE}" in
   RK3326)

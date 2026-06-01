@@ -30,9 +30,12 @@ RUN apt-get update \
     && ln -s /usr/lib/go-1.23/bin/go /usr/bin/go \
     && ln -s /usr/lib/go-1.23/bin/gofmt /usr/bin/gofmt
 
+### Cross compiling on ARM
 RUN if [ "$(uname -m)" = "aarch64" ]; then \
-  apt-get install -y libc6-amd64-cross qemu-user-binfmt --no-install-recommends; \
- fi
+  apt-get install -y --no-install-recommends qemu-user-binfmt libc6-amd64-cross; \
+  if [ ! -e /lib64 ]; then ln -sf /usr/x86_64-linux-gnu/lib64 /lib64; fi; \
+  if [ ! -e /lib/x86_64-linux-gnu ]; then ln -sf /usr/x86_64-linux-gnu/lib/x86_64-linux-gnu /lib/x86_64-linux-gnu; fi; \
+fi
 
 RUN rm -rf /var/lib/apt/lists/*
 

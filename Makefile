@@ -137,6 +137,14 @@ docker-%: DOCKER_CMD:= $(shell if which docker 2>/dev/null 1>/dev/null; then ech
 #   Make sure that docker isn't just an alias for podman
 docker-%: PODMAN_ARGS:= $(shell if echo "$$(docker --version 2>/dev/null || podman --version 2>/dev/null )" | grep podman 1>/dev/null ; then echo "--userns=keep-id --security-opt=label=disable -v /proc/mounts:/etc/mtab"; fi)
 
+# DOCKER_PLATFORM ensures the correct image architecture is used (linux/arm64 on Apple Silicon / aarch64, linux/amd64 otherwise)
+docker-%: DOCKER_PLATFORM := $(shell m=$$(uname -m); if [ "$$m" = "aarch64" ] || [ "$$m" = "arm64" ]; then echo "--platform linux/aarch64"; else echo "--platform linux/amd64"; fi)
+
+# On macOS, bind-mounted volumes do not support chmod (VirtioFS limitation).  Redirect build
+# intermediates to a named Docker volume (/build) so they live on a native Linux filesystem.
+# Sources remain on the bind-mounted host path so they are accessible from macOS.
+docker-%: DOCKER_BUILD_ARGS := $(shell if [ "$$(uname -s)" = "Darwin" ]; then echo "-v rocknix-build:/build -e BUILD_DIR=/build -v rocknix-nix:/nix"; fi)
+
 # Launch docker as interactive if this is an interactive shell (allows ctrl-c for manual and running non-interactive - aka: build server)
 docker-%: INTERACTIVE=$(shell [ -t 0 ] && echo "-it")
 
@@ -153,12 +161,16 @@ docker-shell: COMMAND=bash
 # The build user must also be a member of the "docker" group.
 docker-image-build:
 	$(DOCKER_CMD) buildx create --use
-	$(DOCKER_CMD) buildx build --tag $(DOCKER_IMAGE) --platform $(shell if [ "$$(uname -m)" = "aarch64" ]; then echo "linux/arm64"; else echo "linux/amd64"; fi) --load .
+	$(DOCKER_CMD) buildx build --tag $(DOCKER_IMAGE) $(DOCKER_PLATFORM) --load .
 
 # Command: pulls latest docker image from dockerhub.  This will *replace* locally built version.
 docker-image-pull:
-	$(DOCKER_CMD) pull $(DOCKER_IMAGE)
+	$(DOCKER_CMD) pull $(DOCKER_PLATFORM) $(DOCKER_IMAGE)
 
 # Wire up docker to call equivalent make files using % to match and $* to pass the value matched by %
 docker-%:
-	BUILD_DIR=$(DOCKER_WORK_DIR) $(DOCKER_CMD) run $(PODMAN_ARGS) $(INTERACTIVE) --init --env-file .env --rm --user $(UID):$(GID) $(GLOBAL_SETTINGS) $(LOCAL_SSH_KEYS_FILE) $(EMULATIONSTATION_SRC) -v $(PWD):$(DOCKER_WORK_DIR) -w $(DOCKER_WORK_DIR) $(DOCKER_EXTRA_OPTS) $(DOCKER_IMAGE) $(COMMAND)
+	@if [ "$$(uname -s)" = "Darwin" ]; then \
+	  $(DOCKER_CMD) run --rm --user 0 $(DOCKER_PLATFORM) -v rocknix-build:/build -v rocknix-nix:/nix $(DOCKER_IMAGE) \
+	    bash -c '[ -f /build/.initialized ] || { chown $(UID):$(GID) /build; touch /build/.initialized; chown $(UID):$(GID) /build/.initialized; }; chown $(UID):$(GID) /nix'; \
+	fi
+	$(DOCKER_CMD) run $(DOCKER_PLATFORM) $(PODMAN_ARGS) $(INTERACTIVE) --init --env-file .env --rm --user $(UID):$(GID) $(GLOBAL_SETTINGS) $(LOCAL_SSH_KEYS_FILE) $(EMULATIONSTATION_SRC) -v $(PWD):$(DOCKER_WORK_DIR) -w $(DOCKER_WORK_DIR) $(DOCKER_BUILD_ARGS) $(DOCKER_EXTRA_OPTS) $(DOCKER_IMAGE) $(COMMAND)

@@ -24,7 +24,11 @@ post_unpack() {
  if [ "${DEVICE}" == "RK3326" ]; then
   # RK3326: tune TPL for UART5 used on K36 clones
   cp -v ${PKG_BUILD}/bin/rk33/rk3326_ddr_333MHz_*.bin ${PKG_BUILD}/rk3326_ddr_uart5.bin
-  ${PKG_BUILD}/tools/ddrbin_tool.py rk3326 -g ${PKG_BUILD}/rk3326_ddr_uart5.txt ${PKG_BUILD}/rk3326_ddr_uart5.bin
+
+  # Set QEMU_LD_PREFIX so QEMU can locate x86_64 libraries from libc6-amd64-cross.
+  if [ "$(uname -m)" = "aarch64" ]; then export QEMU_LD_PREFIX=/usr/x86_64-linux-gnu; fi
+
+  ${PKG_BUILD}/tools/ddrbin_tool rk3326 -g ${PKG_BUILD}/rk3326_ddr_uart5.txt ${PKG_BUILD}/rk3326_ddr_uart5.bin
   sed -i 's|uart id=.*$|uart id=5|' ${PKG_BUILD}/rk3326_ddr_uart5.txt
   ${PKG_BUILD}/tools/ddrbin_tool.py rk3326 ${PKG_BUILD}/rk3326_ddr_uart5.txt ${PKG_BUILD}/rk3326_ddr_uart5.bin >/dev/null
  fi

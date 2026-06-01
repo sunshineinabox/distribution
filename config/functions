@@ -1687,9 +1687,9 @@ enable_service() {
 
 # Prevent concurrent modifications to a package during certain activities.
 # With dynamic scheduling we now only need to acquire the lock
-# during unpack and reconf, all other activities do not need to acquire a
-# lock as there should be no concurrent access however the existing code path
-# potentially generates useful logging for minimal cost so keep it.
+# during unpack, reconf and build. build is included because a shared dep can be
+# built inline by multiple parents at once when its stamp is absent and would
+# otherwise race on its build dir; other activities have no concurrent access.
 #
 # If a package is already locked and the owner is ourselves
 # then assume we already have the required lock.
@@ -1700,7 +1700,7 @@ pkg_lock() {
   local this_job="${MTJOBID}"
   local lock_job lock_seq lock_task lock_pkg locked=no idwidth
 
-  if [ "${task}" = "unpack" -o "${task}" = "reconf" ]; then
+  if [ "${task}" = "unpack" -o "${task}" = "reconf" -o "${task}" = "build" ]; then
     exec 98>"${THREAD_CONTROL}/locks/${pkg}.${task}"
     while [ : ]; do
       read -r lock_job lock_seq lock_task lock_pkg <<<$(cat "${THREAD_CONTROL}/locks/${pkg}.${task}.owner" 2>/dev/null)
