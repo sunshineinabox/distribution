@@ -26,4 +26,5 @@ makeinstall_target() {
   ln -sf libcapsimage.so.5.1 ${INSTALL}/usr/lib/libcapsimage.so
   mkdir -p ${INSTALL}/usr/include/caps5
   cp -v LibIPF/* ${INSTALL}/usr/include/caps5
+  cp -v Core/CommonTypes.h ${INSTALL}/usr/include/caps5
 }

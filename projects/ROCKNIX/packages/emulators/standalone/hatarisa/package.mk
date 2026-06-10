@@ -20,10 +20,9 @@ pre_configure_target() {
                          -DCAPSIMAGE_INCLUDE_DIR=${PKG_BUILD}/src/include \
                          -DCAPSIMAGE_LIBRARY=${PKG_BUILD}/libcapsimage.so.5.1"
 
-  # copy IPF Support Library include files
+  # copy IPF Support Library include files (from install_dir: build/ may be cleaned)
   mkdir -p ${PKG_BUILD}/src/includes/caps/
-  cp -R $(get_build_dir capsimg)/LibIPF/* ${PKG_BUILD}/src/includes/caps/
-  cp -R $(get_build_dir capsimg)/Core/CommonTypes.h ${PKG_BUILD}/src/includes/caps/
+  cp -R $(get_install_dir capsimg)/usr/include/caps5/* ${PKG_BUILD}/src/includes/caps/
   cp -R $(get_install_dir capsimg)/usr/lib/libcapsimage.so.5.1 ${PKG_BUILD}/
 
   # add library search path for loading libcapsimage library
