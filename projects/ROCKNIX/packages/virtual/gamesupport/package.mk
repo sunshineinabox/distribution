@@ -15,6 +15,8 @@ case ${DEVICE} in
     ;;
 esac
 
+[[ "${VULKAN_SUPPORT}" = "yes" ]] && PKG_GAMESUPPORT+=" gamescope"
+
 # rocknix-touchscreen-keyboard requires sway
 [[ "${WINDOWMANAGER}" = "swaywm-env" ]] && PKG_GAMESUPPORT+=" rocknix-touchscreen-keyboard"
 

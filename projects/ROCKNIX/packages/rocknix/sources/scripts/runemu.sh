@@ -410,10 +410,54 @@ if [ "${DEVICE_MANGOHUD_SUPPORT}" == "true" ]; then
   fi
 fi
 
+### Check FSR upscaling is supported and enabled
+if [ "${DEVICE_GAMESCOPE_FSR_SUPPORT}" = "true" ] && [ -x /usr/bin/gamescope ]; then
+  FSR_ENABLED=$(get_setting "rocknix.fsr.enabled" "${PLATFORM}" "${ROMNAME##*/}")
+  if [ "${FSR_ENABLED}" = "1" ]; then
+    eval "$(swaymsg -t get_outputs | jq -r '
+      .[] | select(.focused == true) |
+      "FSR_W=\(.current_mode.width) FSR_H=\(.current_mode.height) FSR_TRANSFORM=\(.transform)"
+    ')"
+    if [ -n "${FSR_W}" ] && [ -n "${FSR_H}" ]; then
+      case ${FSR_TRANSFORM} in
+        90|270|flipped-90|flipped-270)
+          FSR_TMP=${FSR_W}; FSR_W=${FSR_H}; FSR_H=${FSR_TMP}
+        ;;
+      esac
+      FSR_MODE=$(get_setting "rocknix.fsr.mode" "${PLATFORM}" "${ROMNAME##*/}")
+      case ${FSR_MODE} in
+        ultra_quality) FSR_SCALE=13 ;;
+        quality)       FSR_SCALE=15 ;;
+        performance)   FSR_SCALE=20 ;;
+        *)             FSR_SCALE=17 ;;
+      esac
+      ### Render at output, FSR upscales to native.
+      FSR_RENDER_W=$(( (FSR_W * 10 / FSR_SCALE) / 2 * 2 ))
+      FSR_RENDER_H=$(( (FSR_H * 10 / FSR_SCALE) / 2 * 2 ))
+      FSR_SHARPNESS=$(get_setting "rocknix.fsr.sharpness" "${PLATFORM}" "${ROMNAME##*/}")
+      case ${FSR_SHARPNESS} in
+        [0-9]|10) ;;
+        *) FSR_SHARPNESS=0 ;;
+      esac
+      FSR_GS_SHARPNESS=$(( 20 - FSR_SHARPNESS * 2 ))
+
+      FSR_FILTER=$(get_setting "rocknix.fsr.filter" "${PLATFORM}" "${ROMNAME##*/}")
+      case ${FSR_FILTER} in
+        fsr|linear|nearest) ;;
+        *) FSR_FILTER=fsr ;;
+      esac
+      ${VERBOSE} && log $0 "Enabling upscaling (${FSR_RENDER_W}x${FSR_RENDER_H} -> ${FSR_W}x${FSR_H}, filter ${FSR_FILTER}, sharpness ${FSR_SHARPNESS})"
+
+      GAMESCOPE_CMD="/usr/bin/gamescope -f -W ${FSR_W} -H ${FSR_H} -w ${FSR_RENDER_W} -h ${FSR_RENDER_H} -F ${FSR_FILTER} --sharpness ${FSR_GS_SHARPNESS} -- env WAYLAND_DISPLAY=gamescope-0"
+      RUNTHIS="${GAMESCOPE_CMD} ${RUNTHIS}"
+    fi
+  fi
+fi
+
 # If the rom is a shell script just execute it, useful for DOSBOX and ScummVM scan scripts
 if [[ "${ROMNAME}" == *".sh" ]] && [ ! "${PLATFORM}" = "ports" ] && [ ! "${PLATFORM}" = "windows" ]; then
         ${VERBOSE} && log $0 "Executing shell script ${ROMNAME}"
-        "${ROMNAME}" &>>${OUTPUT_LOG}
+        ${GAMESCOPE_CMD} "${ROMNAME}" &>>${OUTPUT_LOG}
         ret_error=$?
 else
         ${VERBOSE} && log $0 "Executing $(eval echo ${RUNTHIS})"

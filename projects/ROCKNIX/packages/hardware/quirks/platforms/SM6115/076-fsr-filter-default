@@ -1,0 +1,12 @@
+#!/bin/sh
+
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 ROCKNIX (https://github.com/ROCKNIX)
+
+. /etc/profile
+
+# FSR Sharpening pins CPU on a610
+FSR_FILTER=$(get_setting "rocknix.fsr.filter")
+if [ ! -n "${FSR_FILTER}" ]; then
+  set_setting "rocknix.fsr.filter" "linear"
+fi
