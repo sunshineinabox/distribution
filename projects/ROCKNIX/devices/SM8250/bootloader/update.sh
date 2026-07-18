@@ -60,6 +60,15 @@ if [ -f "$SYSTEM_ROOT/usr/share/bootloader/boot/grub/grubenv" ]; then
   fi
 fi
 
+# ablenv holds selection set by ABL
+if [ -f "$SYSTEM_ROOT/usr/share/bootloader/boot/grub/ablenv" ]; then
+  if [ ! -f "$BOOT_ROOT/boot/grub/ablenv" ]; then
+    mkdir -p $BOOT_ROOT/boot/grub
+    echo "Installing ablenv..."
+    cp $SYSTEM_ROOT/usr/share/bootloader/boot/grub/ablenv $BOOT_ROOT/boot/grub
+  fi
+fi
+
 # mount $BOOT_ROOT ro
 sync
 mount -o remount,ro $BOOT_ROOT
