@@ -15,3 +15,24 @@
 &panel {
 	compatible = "mangmi,bm5460bb1";
 };
+
+&spi2 {
+	status = "okay";
+
+	touchscreen@0 {
+		compatible = "jadard,jd9522ts";
+		reg = <0>;
+		spi-max-frequency = <6000000>;
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <69 IRQ_TYPE_EDGE_FALLING>;
+		reset-gpios = <&tlmm 68 GPIO_ACTIVE_LOW>;
+
+		touchscreen-size-x = <1080>;
+		touchscreen-size-y = <1920>;
+		jadard,panel-max-points = <5>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&ts_irq_default>;
+	};
+};

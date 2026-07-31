@@ -15,3 +15,39 @@
 &panel {
 	compatible = "mangmi,td4310";
 };
+
+&i2c2 {
+	clock-frequency = <400000>;
+	status = "okay";
+
+	touchscreen@70 {
+		compatible = "syna,rmi4-i2c";
+		reg = <0x70>;
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <69 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&tlmm 68 GPIO_ACTIVE_LOW>;
+
+		vdd-supply = <&vreg_l21a_2p704>;
+		vio-supply = <&vreg_l9a_1p8>;
+
+		syna,startup-delay-ms = <200>;
+		syna,reset-delay-ms = <200>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&ts_irq_default>;
+
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		rmi4-f01@1 {
+			reg = <0x1>;
+			syna,nosleep-mode = <1>;
+		};
+
+		rmi4-f12@12 {
+			reg = <0x12>;
+			syna,sensor-type = <1>;
+		};
+	};
+};

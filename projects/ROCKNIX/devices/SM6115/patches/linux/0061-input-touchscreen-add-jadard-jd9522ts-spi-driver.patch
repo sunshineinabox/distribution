@@ -1,0 +1,311 @@
+input: touchscreen: add Jadard JD9522TS SPI driver
+
+Add a touchscreen driver for the Jadard JD9522TS controller.
+
+Sources:
+  - GPL vendor driver: https://github.com/almondnguyen/android_kernel_samsung_a3core
+
+---
+ drivers/input/touchscreen/Kconfig           |  13 +
+ drivers/input/touchscreen/Makefile          |   1 +
+ drivers/input/touchscreen/jadard_jd9522ts.c | 300 +++++++++++++
+ 3 files changed, 314 insertions(+)
+ create mode 100644 drivers/input/touchscreen/jadard_jd9522ts.c
+
+--- a/drivers/input/touchscreen/Kconfig
++++ b/drivers/input/touchscreen/Kconfig
+@@ -1427,3 +1427,15 @@ config TOUCHSCREEN_HIMAX_HX83112A
+ 	  module will be called himax_hx83112a.
+ 
++config TOUCHSCREEN_JADARD_JD9522TS
++	tristate "Jadard JD9522TS touchscreen driver (SPI)"
++	depends on SPI_MASTER
++	help
++	  Say Y here to enable support for the touch side of Jadard JD9522TS
++	  TDDI controllers connected over SPI.
++
++	  If unsure, say N.
++
++	  To compile this driver as a module, choose M here: the
++	  module will be called jadard_jd9522ts.
++
+ endif
+--- a/drivers/input/touchscreen/Makefile
++++ b/drivers/input/touchscreen/Makefile
+@@ -122,2 +122,3 @@
+ obj-$(CONFIG_TOUCHSCREEN_HIMAX_HX83112B)	+= himax_hx83112b.o
+ obj-$(CONFIG_TOUCHSCREEN_HIMAX_HX83112A)	+= himax_hx83112a.o
++obj-$(CONFIG_TOUCHSCREEN_JADARD_JD9522TS)	+= jadard_jd9522ts.o
+--- /dev/null
++++ b/drivers/input/touchscreen/jadard_jd9522ts.c
+@@ -0,0 +1,270 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * Driver for the touch side of Jadard JD9522TS controllers on SPI.
++ */
++
++#include <linux/bitops.h>
++#include <linux/delay.h>
++#include <linux/gpio/consumer.h>
++#include <linux/input.h>
++#include <linux/input/mt.h>
++#include <linux/input/touchscreen.h>
++#include <linux/interrupt.h>
++#include <linux/mod_devicetable.h>
++#include <linux/module.h>
++#include <linux/property.h>
++#include <linux/spi/spi.h>
++#include <linux/unaligned.h>
++
++#define JD_CMD_READ			0xf3
++#define JD_CMD_WRITE			0xf2
++#define JD_CMD_LEN			7
++
++#define JD_ERAM_BASE			0x20011000
++#define JD_SECTION_ENTRY_SIZE		8
++#define JD_MAX_DSRAM_NUM		16
++#define JD_ESRAM_NUM_ADDR		(JD_ERAM_BASE + 4 + \
++					 JD_MAX_DSRAM_NUM * JD_SECTION_ENTRY_SIZE)
++#define JD_ESRAM_INFO_ADDR		(JD_ESRAM_NUM_ADDR + 4)
++
++#define JD_TOUCH_DATA_SIZE		64
++#define JD_FINGER_NUM_OFFSET		0
++#define JD_TOUCH_COORD_OFFSET		3
++#define JD_FINGER_DATA_SIZE		5
++
++#define JD_MAX_SUPPORTED_POINTS		10
++#define JD_DEFAULT_POINTS		5
++
++#define JD_RESET_LOW_MS			20
++#define JD_RESET_DELAY_MS		100
++
++struct jadard_ts {
++	struct spi_device *spi;
++	struct input_dev *input;
++	struct gpio_desc *reset_gpio;
++	struct touchscreen_properties props;
++
++	u32 report_addr;
++	u16 report_len;
++	unsigned int max_points;
++
++	u8 cmd[JD_CMD_LEN];
++	u8 buf[JD_TOUCH_DATA_SIZE] __aligned(sizeof(long));
++};
++
++static int jadard_read_reg(struct jadard_ts *ts, u32 addr, u8 *data, u16 len)
++{
++	struct spi_transfer xfer[2] = { };
++	struct spi_message msg;
++
++	ts->cmd[0] = JD_CMD_READ;
++	put_unaligned_be32(addr, &ts->cmd[1]);
++	put_unaligned_be16(len, &ts->cmd[5]);
++
++	spi_message_init(&msg);
++
++	xfer[0].tx_buf = ts->cmd;
++	xfer[0].len = JD_CMD_LEN;
++	spi_message_add_tail(&xfer[0], &msg);
++
++	xfer[1].rx_buf = data;
++	xfer[1].len = len;
++	spi_message_add_tail(&xfer[1], &msg);
++
++	return spi_sync(ts->spi, &msg);
++}
++
++static int jadard_read_section_info(struct jadard_ts *ts)
++{
++	u32 addr;
++	u32 len;
++	int error;
++
++	error = jadard_read_reg(ts, JD_ESRAM_INFO_ADDR, ts->buf,
++				JD_SECTION_ENTRY_SIZE);
++	if (error)
++		return error;
++
++	addr = get_unaligned_le32(&ts->buf[0]);
++	len = get_unaligned_le32(&ts->buf[4]);
++
++	if ((addr & ~0xfff) != JD_ERAM_BASE || !len || len > JD_TOUCH_DATA_SIZE) {
++		dev_err(&ts->spi->dev,
++			"bad section info: addr %#x len %u\n", addr, len);
++		return -ENODEV;
++	}
++
++	ts->report_addr = addr;
++	ts->report_len = len;
++
++	dev_dbg(&ts->spi->dev, "report buffer at %#x, %u bytes\n", addr, len);
++
++	return 0;
++}
++
++static void jadard_reset(struct jadard_ts *ts)
++{
++	if (!ts->reset_gpio)
++		return;
++
++	gpiod_set_value_cansleep(ts->reset_gpio, 1);
++	msleep(JD_RESET_LOW_MS);
++	gpiod_set_value_cansleep(ts->reset_gpio, 0);
++	msleep(JD_RESET_DELAY_MS);
++}
++
++static void jadard_report_points(struct jadard_ts *ts)
++{
++	unsigned int i;
++
++	for (i = 0; i < ts->max_points; i++) {
++		const u8 *coord = &ts->buf[JD_TOUCH_COORD_OFFSET +
++					   i * JD_FINGER_DATA_SIZE];
++		unsigned int x = get_unaligned_be16(&coord[0]);
++		unsigned int y = get_unaligned_be16(&coord[2]);
++		unsigned int w = coord[4];
++		bool active;
++
++		active = x <= ts->props.max_x && y <= ts->props.max_y;
++
++		input_mt_slot(ts->input, i);
++		if (input_mt_report_slot_state(ts->input, MT_TOOL_FINGER,
++					       active)) {
++			touchscreen_report_pos(ts->input, &ts->props, x, y,
++					       true);
++			input_report_abs(ts->input, ABS_MT_TOUCH_MAJOR, w);
++		}
++	}
++
++	input_mt_sync_frame(ts->input);
++	input_sync(ts->input);
++}
++
++static irqreturn_t jadard_irq(int irq, void *dev_id)
++{
++	struct jadard_ts *ts = dev_id;
++	int error;
++
++	error = jadard_read_reg(ts, ts->report_addr, ts->buf, ts->report_len);
++	if (error) {
++		dev_err_ratelimited(&ts->spi->dev,
++				    "failed to read report: %d\n", error);
++		return IRQ_NONE;
++	}
++
++	jadard_report_points(ts);
++
++	return IRQ_HANDLED;
++}
++
++static int jadard_probe(struct spi_device *spi)
++{
++	struct device *dev = &spi->dev;
++	struct jadard_ts *ts;
++	u32 max_points;
++	int error;
++
++	if (!spi->irq)
++		return dev_err_probe(dev, -EINVAL, "no interrupt assigned\n");
++
++	spi->bits_per_word = 8;
++	spi->mode = SPI_MODE_0;
++	error = spi_setup(spi);
++	if (error)
++		return dev_err_probe(dev, error, "SPI setup failed\n");
++
++	ts = devm_kzalloc(dev, sizeof(*ts), GFP_KERNEL);
++	if (!ts)
++		return -ENOMEM;
++
++	ts->spi = spi;
++	spi_set_drvdata(spi, ts);
++
++	ts->max_points = JD_DEFAULT_POINTS;
++	if (!device_property_read_u32(dev, "jadard,panel-max-points",
++				      &max_points)) {
++		if (max_points < 1 || max_points > JD_MAX_SUPPORTED_POINTS)
++			return dev_err_probe(dev, -EINVAL,
++					     "invalid max points %u\n",
++					     max_points);
++		ts->max_points = max_points;
++	}
++
++	ts->reset_gpio = devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
++	if (IS_ERR(ts->reset_gpio))
++		return dev_err_probe(dev, PTR_ERR(ts->reset_gpio),
++				     "failed to get reset GPIO\n");
++
++	jadard_reset(ts);
++
++	error = jadard_read_section_info(ts);
++	if (error)
++		return dev_err_probe(dev, -EPROBE_DEFER,
++				     "no section info yet (panel not up?): %d\n",
++				     error);
++
++	if (JD_TOUCH_COORD_OFFSET + ts->max_points * JD_FINGER_DATA_SIZE >
++	    ts->report_len)
++		return dev_err_probe(dev, -EINVAL,
++				     "report buffer too small for %u points\n",
++				     ts->max_points);
++
++	ts->input = devm_input_allocate_device(dev);
++	if (!ts->input)
++		return -ENOMEM;
++
++	ts->input->name = "Jadard JD9522TS Touchscreen";
++	ts->input->phys = "input/ts";
++	ts->input->id.bustype = BUS_SPI;
++
++	input_set_abs_params(ts->input, ABS_MT_POSITION_X, 0, 0, 0, 0);
++	input_set_abs_params(ts->input, ABS_MT_POSITION_Y, 0, 0, 0, 0);
++	input_set_abs_params(ts->input, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
++
++	touchscreen_parse_properties(ts->input, true, &ts->props);
++	if (!ts->props.max_x || !ts->props.max_y)
++		return dev_err_probe(dev, -EINVAL,
++				     "touchscreen-size-x/y must be specified\n");
++
++	error = input_mt_init_slots(ts->input, ts->max_points,
++				    INPUT_MT_DIRECT | INPUT_MT_DROP_UNUSED);
++	if (error)
++		return dev_err_probe(dev, error, "failed to init MT slots\n");
++
++	error = devm_request_threaded_irq(dev, spi->irq, NULL, jadard_irq,
++					  IRQF_ONESHOT, dev_name(dev), ts);
++	if (error)
++		return dev_err_probe(dev, error, "failed to request IRQ\n");
++
++	error = input_register_device(ts->input);
++	if (error)
++		return dev_err_probe(dev, error,
++				     "failed to register input device\n");
++
++	return 0;
++}
++
++static const struct of_device_id jadard_of_match[] = {
++	{ .compatible = "jadard,jd9522ts" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, jadard_of_match);
++
++static const struct spi_device_id jadard_spi_id[] = {
++	{ "jd9522ts" },
++	{ }
++};
++MODULE_DEVICE_TABLE(spi, jadard_spi_id);
++
++static struct spi_driver jadard_driver = {
++	.driver = {
++		.name = "jadard-jd9522ts",
++		.of_match_table = jadard_of_match,
++	},
++	.id_table = jadard_spi_id,
++	.probe = jadard_probe,
++};
++module_spi_driver(jadard_driver);
++
++MODULE_DESCRIPTION("Jadard JD9522TS touchscreen driver");
++MODULE_LICENSE("GPL");

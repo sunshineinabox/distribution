@@ -1232,10 +1232,6 @@
 	};
 };
 
-&spi2 {
-	status = "okay";
-};
-
 &tlmm {
 	mdp_vsync_active: mdp-vsync-active-state {
 		pins = "gpio81";

@@ -17,6 +17,8 @@
 };
 
 &spi2 {
+	status = "okay";
+
 	touchscreen@0 {
 		compatible = "himax,hx83112a";
 		reg = <0>;
