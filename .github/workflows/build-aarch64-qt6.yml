@@ -27,7 +27,6 @@ jobs:
       PROJECT: ${{ inputs.PROJECT }}
       DEVICE: ${{ inputs.DEVICE }}
       ARCH: aarch64
-      CACHE_KEY: ccache-aarch64-${{ inputs.DEVICE }}-qt6-${{ github.sha }}
       DISABLE_COLORS: yes
       CCACHE_COMPILERCHECK: content
       CCACHE_COMPRESS: 1
@@ -58,12 +57,12 @@ jobs:
         uses: corrupt952/actions-retry-command@v1.0.7
         with:
           command: |
-            tar -xf build.aarch64.tar
+            tar --zstd -xf build.aarch64.tar.zst
           max_attempts: 3
           retry_interval: 10
 
       - name: Clean up compressed aarch64 file
-        run: rm build.aarch64.tar
+        run: rm build.aarch64.tar.zst
 
       - name: Build
         uses: corrupt952/actions-retry-command@v1.0.7

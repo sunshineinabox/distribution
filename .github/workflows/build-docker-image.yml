@@ -1,18 +1,35 @@
 name: Build Docker Image
 
+# The build container is rebuilt monthly
+# Nightly jobs pull latest, so the toolchain environment 
+# stays stable between rebuilds.
 on:
-  workflow_call:
-    inputs:
-      OWNER_LC:
-        description: "repo owner name"
-        type: string
-        required: true
+  workflow_dispatch:
+  schedule:
+    - cron: "0 1 1 * *"
+  push:
+    branches:
+      - next
+    paths:
+      - Dockerfile
+      - .github/workflows/build-docker-image.yml
+
 jobs:
   build-docker-image:
+    if: github.event_name != 'schedule' || github.repository == 'ROCKNIX/distribution'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
+
+      - name: Set image metadata
+        id: meta
+        run: |
+          echo "owner_lc=${GITHUB_REPOSITORY_OWNER,,}" >> $GITHUB_OUTPUT
+          echo "month=$(date -u +%Y-%m)" >> $GITHUB_OUTPUT
 
       - name: Login to GHCR
         uses: docker/login-action@v4
@@ -27,4 +44,6 @@ jobs:
           context: .
           file: Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ghcr.io/${{ inputs.OWNER_LC }}/rocknix-build:latest
+          tags: |
+            ghcr.io/${{ steps.meta.outputs.owner_lc }}/rocknix-build:latest
+            ghcr.io/${{ steps.meta.outputs.owner_lc }}/rocknix-build:${{ steps.meta.outputs.month }}

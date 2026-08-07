@@ -25,7 +25,6 @@ jobs:
       PROJECT: ${{ inputs.PROJECT }}
       DEVICE: ${{ inputs.DEVICE }}
       ARCH: aarch64
-      CACHE_KEY: ccache-aarch64-${{ inputs.DEVICE }}-base-${{ github.sha }}
       DISABLE_COLORS: yes
       CCACHE_COMPILERCHECK: content
       CCACHE_COMPRESS: 1
@@ -145,18 +144,20 @@ jobs:
 
       - name: Compress directory
         run: |
-          sudo tar --remove-files \
-          -cf build.build.aarch64.tar ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/build
-          sudo tar --remove-files \
-          -cf build.aarch64.tar ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/
+          sudo tar --remove-files -I 'zstd -T0' \
+          -cf build.build.aarch64.tar.zst ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/build
+          sudo tar --remove-files -I 'zstd -T0' \
+          -cf build.aarch64.tar.zst ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/
 
       - uses: actions/upload-artifact@v7
         with:
           name: aarch64 (${{ inputs.DEVICE }})
-          path: build.aarch64.tar
+          path: build.aarch64.tar.zst
+          compression-level: 0
           if-no-files-found: error
       - uses: actions/upload-artifact@v7
         with:
           name: aarch64 build (${{ inputs.DEVICE }})
-          path: build.build.aarch64.tar
+          path: build.build.aarch64.tar.zst
+          compression-level: 0
           if-no-files-found: error

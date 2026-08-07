@@ -159,20 +159,14 @@ jobs:
           
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
-  build-docker:
-    if: github.event_name != 'schedule' || (github.repository == 'ROCKNIX/distribution' && github.ref_name == 'next')
-    name: Docker
-    needs: set-envs
-    uses: ./.github/workflows/build-docker-image.yml
-    with:
-      OWNER_LC: ${{ needs.set-envs.outputs.OWNER_LC }}
-
+  # the build container is no longer rebuilt per nightly
+  # Latest image published by build-docker-image.yml (monthly or  Dockerfile
+  # changes), keeping the toolchain environment stable between rebuilds
   build-devices:
     if: (github.event_name != 'schedule') || (github.repository == 'ROCKNIX/distribution' && github.ref_name == 'next')
     name: Build Devices
     needs:
       - set-envs
-      - build-docker
     strategy:
       fail-fast: false
       matrix:
