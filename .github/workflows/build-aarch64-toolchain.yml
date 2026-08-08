@@ -41,12 +41,67 @@ jobs:
         with:
           fetch-depth: 0
 
+      # The toolchain rarely changes night-over-night, so the finished artifact
+      # tar is persisted to the cache repo keyed on everything that can affect
+      # it: the container image digest (rolls monthly) and the tree hash of the
+      # toolchain packages, config, scripts, device options and this workflow.
+      # On a key hit the whole build is skipped and the persisted tar is
+      # re-uploaded as this run's artifact; per-package changes on a miss still
+      # rebuild incrementally via stamps + ccache as before.
+      - name: Toolchain cache key
+        id: key
+        run: |
+          docker pull -q "ghcr.io/${{ inputs.OWNER_LC }}/rocknix-build:latest"
+          DIGEST=$(docker image inspect --format '{{index .RepoDigests 0}}' "ghcr.io/${{ inputs.OWNER_LC }}/rocknix-build:latest")
+          TREE=$(git ls-files -s packages/toolchain config scripts \
+                 .github/workflows/build-aarch64-toolchain.yml \
+                 "projects/${PROJECT}/devices/${DEVICE}/options" | sha256sum | cut -d' ' -f1)
+          KEY=$(printf '%s %s' "${DIGEST}" "${TREE}" | sha256sum | cut -d' ' -f1)
+          echo "image: ${DIGEST}"
+          echo "key: ${KEY}"
+          echo "key=${KEY}" >> $GITHUB_OUTPUT
+
+      - name: Restore persisted toolchain
+        id: restore
+        run: |
+          BASE="https://github.com/${{ github.repository_owner }}/${{ vars.CACHE_REPO || 'distribution-cache' }}/releases/download/toolchain"
+          NAME="toolchain-aarch64-${{ inputs.DEVICE }}"
+          KEY="${{ steps.key.outputs.key }}"
+          hit=no
+          if [ "${{ vars.DISABLE_TOOLCHAIN_CACHE }}" != "yes" ] && \
+             curl -L --fail --silent --show-error -o "${NAME}.key" "${BASE}/${NAME}.key"; then
+            read -r RKEY RSHA RNPARTS < "${NAME}.key" || true
+            if [ "${RKEY}" = "${KEY}" ]; then
+              SUFFIXES=(aa ab ac ad ae af ag ah)
+              ok=yes
+              for ((i=0; i<RNPARTS; i++)); do
+                curl -L --fail --silent --show-error -O "${BASE}/${NAME}.tar.zst.part${SUFFIXES[$i]}" || { ok=no; break; }
+              done
+              if [ "${ok}" = "yes" ]; then
+                cat ${NAME}.tar.zst.part* > build.aarch64-toolchain.tar.zst
+                if [ "$(sha256sum build.aarch64-toolchain.tar.zst | cut -d' ' -f1)" = "${RSHA}" ]; then
+                  hit=yes
+                else
+                  echo "checksum mismatch - rebuilding"
+                  rm build.aarch64-toolchain.tar.zst
+                fi
+              fi
+            else
+              echo "key mismatch - rebuilding"
+            fi
+          fi
+          rm -f "${NAME}.key" ${NAME}.tar.zst.part*
+          echo "toolchain cache hit: ${hit}"
+          echo "hit=${hit}" >> $GITHUB_OUTPUT
+
       - name: Retrieve ccache
+        if: steps.restore.outputs.hit != 'yes'
         run: |
           URL="https://github.com/${{ github.repository_owner }}/${{ vars.CACHE_REPO || 'distribution-cache' }}/releases/download/ccache/ccache-aarch64-${{ inputs.DEVICE }}-toolchain.tar"
-          curl -L --fail --silent --show-error "$URL" | tar -xvf - || echo "Cache archive not found, skipping."            
+          curl -L --fail --silent --show-error "$URL" | tar -xvf - || echo "Cache archive not found, skipping."
 
       - name: Build
+        if: steps.restore.outputs.hit != 'yes'
         uses: corrupt952/actions-retry-command@v1.0.7
         with:
           command: |
@@ -69,6 +124,7 @@ jobs:
             ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/.threads/logs/
 
       - name: Clean ccache
+        if: steps.restore.outputs.hit != 'yes'
         run: |
           export CCACHE_DIR=./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/.ccache
           ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/toolchain/bin/ccache -s -v
@@ -78,10 +134,12 @@ jobs:
           ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/toolchain/bin/ccache -z
 
       - name: Tar ccache
+        if: steps.restore.outputs.hit != 'yes'
         run: |
-          tar --remove-files -cf ccache-aarch64-${{ inputs.DEVICE }}-toolchain.tar ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/.ccache  
+          tar --remove-files -cf ccache-aarch64-${{ inputs.DEVICE }}-toolchain.tar ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/.ccache
 
       - name: Save ccache
+        if: steps.restore.outputs.hit != 'yes'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: ccache
@@ -94,12 +152,40 @@ jobs:
         continue-on-error: true
 
       - name: Compress directory
+        if: steps.restore.outputs.hit != 'yes'
         run: |
-          tar --zstd -cf build.aarch64-toolchain.tar.zst \
+          tar -I 'zstd -T0' -cf build.aarch64-toolchain.tar.zst \
           ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/toolchain \
           ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/build \
           ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/install_* \
           ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/.stamps
+
+      # sidecar carries "key sha256 nparts" so a partial or torn upload can
+      # never produce a false hit - any inconsistency falls back to a build
+      - name: Prepare toolchain cache upload
+        if: steps.restore.outputs.hit != 'yes'
+        run: |
+          NAME="toolchain-aarch64-${{ inputs.DEVICE }}"
+          SHA=$(sha256sum build.aarch64-toolchain.tar.zst | cut -d' ' -f1)
+          split -b 1900m build.aarch64-toolchain.tar.zst "${NAME}.tar.zst.part"
+          NPARTS=$(ls ${NAME}.tar.zst.part* | wc -l)
+          echo "${{ steps.key.outputs.key }} ${SHA} ${NPARTS}" > "${NAME}.key"
+
+      - name: Save toolchain cache
+        if: steps.restore.outputs.hit != 'yes'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: toolchain
+          files: |
+            toolchain-aarch64-${{ inputs.DEVICE }}.tar.zst.part*
+            toolchain-aarch64-${{ inputs.DEVICE }}.key
+          make_latest: false
+          prerelease: true
+          body: persisted toolchain trees
+          token: ${{ secrets.GH_PAT }}
+          repository: ${{ github.repository_owner }}/${{ vars.CACHE_REPO || 'distribution-cache' }}
+        continue-on-error: true
+
       - uses: actions/upload-artifact@v7
         with:
           name: aarch64-toolchain (${{ inputs.DEVICE }})

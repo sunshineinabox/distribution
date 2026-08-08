@@ -33,19 +33,76 @@ jobs:
         with:
           fetch-depth: 0
 
+      # rustc is built from source and ccache can't help it, so the finished
+      # artifact tar is persisted like the toolchain's. The key includes the
+      # toolchain's own key inputs: this tar contains the toolchain tree it
+      # was built on and is extracted over the base tree downstream, so a
+      # rust bundle must never outlive the toolchain it embeds.
+      - name: Rust cache key
+        id: key
+        run: |
+          docker pull -q "ghcr.io/${{ inputs.OWNER_LC }}/rocknix-build:latest"
+          DIGEST=$(docker image inspect --format '{{index .RepoDigests 0}}' "ghcr.io/${{ inputs.OWNER_LC }}/rocknix-build:latest")
+          TREE=$(git ls-files -s packages/toolchain packages/rust config scripts \
+                 "projects/${PROJECT}/packages/rust" \
+                 .github/workflows/build-aarch64-toolchain.yml \
+                 .github/workflows/build-aarch64-rust.yml \
+                 "projects/${PROJECT}/devices/${DEVICE}/options" | sha256sum | cut -d' ' -f1)
+          KEY=$(printf '%s %s' "${DIGEST}" "${TREE}" | sha256sum | cut -d' ' -f1)
+          echo "image: ${DIGEST}"
+          echo "key: ${KEY}"
+          echo "key=${KEY}" >> $GITHUB_OUTPUT
+
+      - name: Restore persisted rust
+        id: restore
+        run: |
+          BASE="https://github.com/${{ github.repository_owner }}/${{ vars.CACHE_REPO || 'distribution-cache' }}/releases/download/rust"
+          NAME="rust-aarch64-${{ inputs.DEVICE }}"
+          KEY="${{ steps.key.outputs.key }}"
+          hit=no
+          if [ "${{ vars.DISABLE_RUST_CACHE }}" != "yes" ] && \
+             curl -L --fail --silent --show-error -o "${NAME}.key" "${BASE}/${NAME}.key"; then
+            read -r RKEY RSHA RNPARTS < "${NAME}.key" || true
+            if [ "${RKEY}" = "${KEY}" ]; then
+              SUFFIXES=(aa ab ac ad ae af ag ah)
+              ok=yes
+              for ((i=0; i<RNPARTS; i++)); do
+                curl -L --fail --silent --show-error -O "${BASE}/${NAME}.tar.zst.part${SUFFIXES[$i]}" || { ok=no; break; }
+              done
+              if [ "${ok}" = "yes" ]; then
+                cat ${NAME}.tar.zst.part* > build.aarch64-rust.tar.zst
+                if [ "$(sha256sum build.aarch64-rust.tar.zst | cut -d' ' -f1)" = "${RSHA}" ]; then
+                  hit=yes
+                else
+                  echo "checksum mismatch - rebuilding"
+                  rm build.aarch64-rust.tar.zst
+                fi
+              fi
+            else
+              echo "key mismatch - rebuilding"
+            fi
+          fi
+          rm -f "${NAME}.key" ${NAME}.tar.zst.part*
+          echo "rust cache hit: ${hit}"
+          echo "hit=${hit}" >> $GITHUB_OUTPUT
+
       - name: Download aarch64-toolchain (${{ inputs.DEVICE }})
+        if: steps.restore.outputs.hit != 'yes'
         uses: actions/download-artifact@v8
         with:
           name: aarch64-toolchain (${{ inputs.DEVICE }})
 
       - name: Extract artifact aarch64-toolchain
+        if: steps.restore.outputs.hit != 'yes'
         run: |
           tar --zstd -xf build.aarch64-toolchain.tar.zst
 
       - name: Clean up compressed aarch64-toolchain file
+        if: steps.restore.outputs.hit != 'yes'
         run: rm build.aarch64-toolchain.tar.zst
 
       - name: Build cargo:host
+        if: steps.restore.outputs.hit != 'yes'
         uses: corrupt952/actions-retry-command@v1.0.7
         with:
           command: |
@@ -71,9 +128,34 @@ jobs:
         run: df -h
 
       - name: Compress directory
+        if: steps.restore.outputs.hit != 'yes'
         run: |
-          tar --zstd --remove-files \
+          tar -I 'zstd -T0' --remove-files \
           -cf build.aarch64-rust.tar.zst ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/
+
+      - name: Prepare rust cache upload
+        if: steps.restore.outputs.hit != 'yes'
+        run: |
+          NAME="rust-aarch64-${{ inputs.DEVICE }}"
+          SHA=$(sha256sum build.aarch64-rust.tar.zst | cut -d' ' -f1)
+          split -b 1900m build.aarch64-rust.tar.zst "${NAME}.tar.zst.part"
+          NPARTS=$(ls ${NAME}.tar.zst.part* | wc -l)
+          echo "${{ steps.key.outputs.key }} ${SHA} ${NPARTS}" > "${NAME}.key"
+
+      - name: Save rust cache
+        if: steps.restore.outputs.hit != 'yes'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: rust
+          files: |
+            rust-aarch64-${{ inputs.DEVICE }}.tar.zst.part*
+            rust-aarch64-${{ inputs.DEVICE }}.key
+          make_latest: false
+          prerelease: true
+          body: persisted rust trees
+          token: ${{ secrets.GH_PAT }}
+          repository: ${{ github.repository_owner }}/${{ vars.CACHE_REPO || 'distribution-cache' }}
+        continue-on-error: true
 
       - uses: actions/upload-artifact@v7
         with:
