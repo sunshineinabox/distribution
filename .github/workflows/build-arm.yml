@@ -22,7 +22,6 @@ jobs:
       DEVICE: ${{ inputs.DEVICE }}
       ARCH: arm
       AUTOREMOVE: "yes"
-      AUTOREMOVE_BLOCK: "box86"
       DISABLE_COLORS: yes
       CCACHE_COMPILERCHECK: content
       CCACHE_COMPRESS: 1
