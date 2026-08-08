@@ -141,3 +141,48 @@ jobs:
             target/ROCKNIX-*.tar.sha256
           compression-level: 0
           if-no-files-found: error
+
+      # Persist the full build tree for the next nightly: this job is the only
+      # one holding the union of every stage (base + qt6 + both emu sets), so
+      # the tree saved here lets tomorrow's toolchain job restore it and every
+      # stage stamp-skip all unchanged packages. Key must match the toolchain
+      # workflow's "Tree cache key" step - global inputs only, stamps handle
+      # per-package changes.
+      - name: Tree cache key
+        if: vars.DISABLE_TREE_CACHE != 'yes'
+        id: treekey
+        run: |
+          DIGEST=$(docker image inspect --format '{{index .RepoDigests 0}}' "ghcr.io/${{ inputs.OWNER_LC }}/rocknix-build:latest")
+          TREE=$(git ls-files -s config scripts distributions \
+                 "projects/${PROJECT}/devices/${DEVICE}/options" | sha256sum | cut -d' ' -f1)
+          KEY=$(printf '%s %s' "${DIGEST}" "${TREE}" | sha256sum | cut -d' ' -f1)
+          echo "key: ${KEY}"
+          echo "key=${KEY}" >> $GITHUB_OUTPUT
+
+      - name: Compress tree for cache
+        if: vars.DISABLE_TREE_CACHE != 'yes'
+        run: |
+          NAME="tree-aarch64-${{ inputs.DEVICE }}"
+          sudo tar -I 'zstd -T0' -cf - \
+          ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/toolchain \
+          ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/build \
+          ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/install_* \
+          ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/.stamps | split -b 1900m - "${NAME}.tar.zst.part"
+          SHA=$(cat ${NAME}.tar.zst.part* | sha256sum | cut -d' ' -f1)
+          NPARTS=$(ls ${NAME}.tar.zst.part* | wc -l)
+          echo "${{ steps.treekey.outputs.key }} ${SHA} ${NPARTS}" > "${NAME}.key"
+
+      - name: Save tree cache
+        if: vars.DISABLE_TREE_CACHE != 'yes'
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: tree
+          files: |
+            tree-aarch64-${{ inputs.DEVICE }}.tar.zst.part*
+            tree-aarch64-${{ inputs.DEVICE }}.key
+          make_latest: false
+          prerelease: true
+          body: persisted build trees
+          token: ${{ secrets.GH_PAT }}
+          repository: ${{ github.repository_owner }}/${{ vars.CACHE_REPO || 'distribution-cache' }}
+        continue-on-error: true

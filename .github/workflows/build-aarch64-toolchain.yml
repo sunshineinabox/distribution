@@ -41,14 +41,71 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Full-tree cache: the image job persists the whole per-device build
+      # tree nightly. The key covers only GLOBAL inputs (container digest,
+      # config, scripts, distributions, device options) - package changes are
+      # handled by the restored per-package stamps, which rebuild exactly the
+      # delta in the stages downstream. Restore skips on Sundays (UTC) so each
+      # week starts from a clean full rebuild, bounding incremental-tree
+      # staleness to 7 days.
+      - name: Tree cache key
+        id: treekey
+        run: |
+          docker pull -q "ghcr.io/${{ inputs.OWNER_LC }}/rocknix-build:latest"
+          DIGEST=$(docker image inspect --format '{{index .RepoDigests 0}}' "ghcr.io/${{ inputs.OWNER_LC }}/rocknix-build:latest")
+          TREE=$(git ls-files -s config scripts distributions \
+                 "projects/${PROJECT}/devices/${DEVICE}/options" | sha256sum | cut -d' ' -f1)
+          KEY=$(printf '%s %s' "${DIGEST}" "${TREE}" | sha256sum | cut -d' ' -f1)
+          echo "key: ${KEY}"
+          echo "key=${KEY}" >> $GITHUB_OUTPUT
+
+      - name: Restore persisted tree
+        id: tree
+        run: |
+          BASE="https://github.com/${{ github.repository_owner }}/${{ vars.CACHE_REPO || 'distribution-cache' }}/releases/download/tree"
+          NAME="tree-aarch64-${{ inputs.DEVICE }}"
+          KEY="${{ steps.treekey.outputs.key }}"
+          hit=no
+          if [ "$(date -u +%u)" = "7" ]; then
+            echo "weekly clean day - building from scratch"
+          elif [ "${{ vars.DISABLE_TREE_CACHE }}" != "yes" ] && \
+             curl -L --fail --silent --show-error -o "${NAME}.key" "${BASE}/${NAME}.key"; then
+            read -r RKEY RSHA RNPARTS < "${NAME}.key" || true
+            if [ "${RKEY}" = "${KEY}" ]; then
+              SUFFIXES=(aa ab ac ad ae af ag ah)
+              ok=yes
+              for ((i=0; i<RNPARTS; i++)); do
+                curl -L --fail --silent --show-error -O "${BASE}/${NAME}.tar.zst.part${SUFFIXES[$i]}" || { ok=no; break; }
+              done
+              if [ "${ok}" = "yes" ]; then
+                cat ${NAME}.tar.zst.part* > tree.tar.zst
+                rm ${NAME}.tar.zst.part*
+                if [ "$(sha256sum tree.tar.zst | cut -d' ' -f1)" = "${RSHA}" ]; then
+                  tar --zstd -xf tree.tar.zst
+                  hit=yes
+                else
+                  echo "checksum mismatch - ignoring tree cache"
+                fi
+                rm tree.tar.zst
+              fi
+            else
+              echo "key mismatch - ignoring tree cache"
+            fi
+          fi
+          rm -f "${NAME}.key" ${NAME}.tar.zst.part*
+          echo "tree cache hit: ${hit}"
+          echo "hit=${hit}" >> $GITHUB_OUTPUT
+
       # The toolchain rarely changes night-over-night, so the finished artifact
       # tar is persisted to the cache repo keyed on everything that can affect
       # it: the container image digest (rolls monthly) and the tree hash of the
       # toolchain packages, config, scripts, device options and this workflow.
       # On a key hit the whole build is skipped and the persisted tar is
       # re-uploaded as this run's artifact; per-package changes on a miss still
-      # rebuild incrementally via stamps + ccache as before.
+      # rebuild incrementally via stamps + ccache as before. On a full-tree hit
+      # this layer is bypassed: the build must run so stamps can apply deltas.
       - name: Toolchain cache key
+        if: steps.tree.outputs.hit != 'yes'
         id: key
         run: |
           docker pull -q "ghcr.io/${{ inputs.OWNER_LC }}/rocknix-build:latest"
@@ -62,6 +119,7 @@ jobs:
           echo "key=${KEY}" >> $GITHUB_OUTPUT
 
       - name: Restore persisted toolchain
+        if: steps.tree.outputs.hit != 'yes'
         id: restore
         run: |
           BASE="https://github.com/${{ github.repository_owner }}/${{ vars.CACHE_REPO || 'distribution-cache' }}/releases/download/toolchain"
@@ -163,7 +221,7 @@ jobs:
       # sidecar carries "key sha256 nparts" so a partial or torn upload can
       # never produce a false hit - any inconsistency falls back to a build
       - name: Prepare toolchain cache upload
-        if: steps.restore.outputs.hit != 'yes'
+        if: steps.tree.outputs.hit != 'yes' && steps.restore.outputs.hit != 'yes'
         run: |
           NAME="toolchain-aarch64-${{ inputs.DEVICE }}"
           SHA=$(sha256sum build.aarch64-toolchain.tar.zst | cut -d' ' -f1)
@@ -172,7 +230,7 @@ jobs:
           echo "${{ steps.key.outputs.key }} ${SHA} ${NPARTS}" > "${NAME}.key"
 
       - name: Save toolchain cache
-        if: steps.restore.outputs.hit != 'yes'
+        if: steps.tree.outputs.hit != 'yes' && steps.restore.outputs.hit != 'yes'
         uses: softprops/action-gh-release@v3
         with:
           tag_name: toolchain
