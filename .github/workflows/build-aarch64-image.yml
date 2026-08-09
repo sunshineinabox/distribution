@@ -170,7 +170,7 @@ jobs:
           ./build.ROCKNIX-${{ inputs.DEVICE }}.aarch64/.stamps | split -b 1900m - "${NAME}.tar.zst.part"
           SHA=$(cat ${NAME}.tar.zst.part* | sha256sum | cut -d' ' -f1)
           NPARTS=$(ls ${NAME}.tar.zst.part* | wc -l)
-          echo "${{ steps.treekey.outputs.key }} ${SHA} ${NPARTS}" > "${NAME}.key"
+          echo "${{ steps.treekey.outputs.key }} ${SHA} ${NPARTS} ${{ github.sha }}" > "${NAME}.key"
 
       - name: Save tree cache
         if: vars.DISABLE_TREE_CACHE != 'yes'

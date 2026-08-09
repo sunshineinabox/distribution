@@ -70,8 +70,13 @@ jobs:
             echo "weekly clean day - building from scratch"
           elif [ "${{ vars.DISABLE_TREE_CACHE }}" != "yes" ] && \
              curl -L --fail --silent --show-error -o "${NAME}.key" "${BASE}/${NAME}.key"; then
-            read -r RKEY RSHA RNPARTS < "${NAME}.key" || true
-            if [ "${RKEY}" = "${KEY}" ]; then
+            read -r RKEY RSHA RNPARTS RGITSHA < "${NAME}.key" || true
+            # the bundle must descend from a commit in our history so the
+            # dependent-invalidation diff below is meaningful; old/foreign
+            # bundles degrade to a normal full build
+            if [ "${RKEY}" = "${KEY}" ] && [ -n "${RGITSHA}" ] && \
+               git cat-file -e "${RGITSHA}" 2>/dev/null && \
+               git merge-base --is-ancestor "${RGITSHA}" HEAD; then
               SUFFIXES=(aa ab ac ad ae af ag ah)
               ok=yes
               for ((i=0; i<RNPARTS; i++)); do
@@ -83,6 +88,7 @@ jobs:
                 if [ "$(sha256sum tree.tar.zst | cut -d' ' -f1)" = "${RSHA}" ]; then
                   tar --zstd -xf tree.tar.zst
                   hit=yes
+                  echo "sha=${RGITSHA}" >> $GITHUB_OUTPUT
                 else
                   echo "checksum mismatch - ignoring tree cache"
                 fi
@@ -95,6 +101,18 @@ jobs:
           rm -f "${NAME}.key" ${NAME}.tar.zst.part*
           echo "tree cache hit: ${hit}"
           echo "hit=${hit}" >> $GITHUB_OUTPUT
+
+      # stamps only hash a package's OWN inputs - a dependency bump alone
+      # leaves dependents' stamps valid, which on a restored tree would ship
+      # binaries built against the old library. Diff against the commit the
+      # tree was built from and drop the stamps of every transitive dependent
+      # of every changed package, so the normal build rebuilds exactly them.
+      - name: Invalidate dependents of changed packages
+        if: steps.tree.outputs.hit == 'yes'
+        run: |
+          ./scripts/get_env > .env
+          docker run --init --env-file .env --rm --user $(id -u):$(id -g) -v ${PWD}:${PWD} -w ${PWD} "ghcr.io/${{ inputs.OWNER_LC }}/rocknix-build:latest" \
+            bash -c "./.github/scripts/invalidate-stale-dependents ${{ steps.tree.outputs.sha }}"
 
       # The toolchain rarely changes night-over-night, so the finished artifact
       # tar is persisted to the cache repo keyed on everything that can affect

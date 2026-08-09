@@ -1,0 +1,96 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026-present ROCKNIX (https://github.com/ROCKNIX)
+
+# Package stamps only hash a package's OWN inputs (calculate_stamp), so on a
+# restored build tree a dependency bump leaves its dependents' stamps valid -
+# they would skip and ship binaries built against the old library. This
+# restores the propagation the stampless nightly had by brute force: diff the
+# tree bundle's source commit against HEAD, map changed paths to packages,
+# and delete the stamps of every transitive dependent so the normal build
+# rebuilds exactly that cone.
+#
+# Usage: invalidate-stale-dependents <tree-source-sha>
+# Runs inside the build container at the repo root with PROJECT/DEVICE/ARCH
+# in the environment. On any internal failure it falls back to clearing ALL
+# stamps - never proceeds with a potentially stale tree.
+
+set -e
+
+BUILD_DIR="build.${DISTRO:-ROCKNIX}-${DEVICE}.${ARCH}"
+
+invalidate_all() {
+  echo "invalidation failed - clearing all stamps for a full rebuild"
+  rm -rf "${BUILD_DIR}/.stamps"
+  exit 0
+}
+trap invalidate_all ERR
+
+LAST_SHA="$1"
+[ -n "${LAST_SHA}" ] || invalidate_all
+
+git diff --name-only "${LAST_SHA}..HEAD" -- packages projects > .changed-paths
+if [ ! -s .changed-paths ]; then
+  echo "no package changes since ${LAST_SHA} - nothing to invalidate"
+  rm -f .changed-paths
+  exit 0
+fi
+
+# full dependency graph, superset env (all stages' packages included)
+./scripts/pkgjson | ./scripts/genbuildplan.py --hide-wants \
+  --with-json .plan-full.json --build image > /dev/null
+
+python3 - "${BUILD_DIR}" <<'EOF'
+import json, shutil, sys
+from pathlib import Path
+
+build_dir = Path(sys.argv[1])
+
+# changed path -> package: nearest ancestor dir holding a package.mk, with
+# the patches/<pkg>/ convention as fallback (patch dirs live outside pkg dirs)
+changed = set()
+for line in Path(".changed-paths").read_text().splitlines():
+    p = Path(line.strip())
+    if not line.strip():
+        continue
+    for parent in p.parents:
+        if (parent / "package.mk").is_file():
+            changed.add(parent.name)
+            break
+    else:
+        parts = p.parts
+        if "patches" in parts:
+            i = parts.index("patches")
+            if i + 1 < len(parts) - 1 or (i + 1 < len(parts) and "." not in parts[i + 1]):
+                changed.add(parts[i + 1])
+
+reverse = {}
+plan = json.load(open(".plan-full.json"))
+in_graph = set()
+for job in plan:
+    pkg = job["name"].split(":")[0]
+    in_graph.add(pkg)
+    for want in job.get("wants", []):
+        reverse.setdefault(want.split(":")[0], set()).add(pkg)
+
+# transitive closure of dependents of every changed package
+closure, todo = set(), [c for c in changed if c in in_graph]
+while todo:
+    pkg = todo.pop()
+    if pkg in closure:
+        continue
+    closure.add(pkg)
+    todo.extend(reverse.get(pkg, ()))
+
+dropped = 0
+for pkg in sorted(closure):
+    stamp = build_dir / ".stamps" / pkg
+    if stamp.is_dir():
+        shutil.rmtree(stamp)
+        dropped += 1
+
+print(f"changed: {len(changed)} package(s) {sorted(changed)}")
+print(f"invalidated {dropped} stamp dir(s) from a closure of {len(closure)}")
+EOF
+
+rm -f .changed-paths .plan-full.json
