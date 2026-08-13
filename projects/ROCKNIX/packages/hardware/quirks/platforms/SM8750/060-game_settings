@@ -19,6 +19,12 @@ do
   fi
 done
 
+### RPCS3 to use Vulkan as the default graphics backend.
+if [ -z "$(get_setting ps3.graphics_backend)" ]
+then
+  set_setting ps3.graphics_backend vulkan
+fi
+
 for SYSTEM in saturn st-v
 do
   CORES=$(get_setting ${SYSTEM}.cores)
