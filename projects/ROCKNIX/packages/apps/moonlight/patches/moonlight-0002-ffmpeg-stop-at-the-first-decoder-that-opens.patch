@@ -1,0 +1,21 @@
+Subject: [PATCH] ffmpeg: stop at the first decoder that opens
+
+The probe loop never breaks, so a hardware decoder that opened at try 3
+is thrown away at try 4, which unconditionally replaces it with software
+h264/hevc and allocates a second context over the first. Try 5 then
+reopens the same software decoder a third time. The result is that the
+ffmpeg backend always decodes in software - h264_v4l2m2m can never win -
+and two AVCodecContexts leak per init.
+
+diff --git a/src/video/ffmpeg.c b/src/video/ffmpeg.c
+--- a/src/video/ffmpeg.c
++++ b/src/video/ffmpeg.c
+@@ -126,6 +126,8 @@
+       avcodec_free_context(&decoder_ctx);
+       continue;
+     }
++
++    break;
+   }
+ 
+   if (decoder == NULL) {

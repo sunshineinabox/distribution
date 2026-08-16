@@ -6,8 +6,8 @@ PKG_LICENSE="GPLv3"
 PKG_SITE="https://github.com/moonlight-stream/moonlight-"
 PKG_DEPENDS_TARGET="toolchain opus SDL2 libevdev alsa curl enet avahi ffmpeg"
 PKG_LONGDESC="Moonlight is an open source implementation of NVIDIA's GameStream, as used by the NVIDIA Shield, but built for Linux."
-
-PKG_PATCH_DIRS+="${DEVICE}"
+GET_HANDLER_SUPPORT="git"
+PKG_PATCH_DIRS+=" ${DEVICE}"
 
 if [ "${TARGET_ARCH}" = "null" ]
 then
@@ -31,7 +31,7 @@ then
 else
   PKG_SITE+="embedded"
   PKG_URL="${PKG_SITE}.git"
-  PKG_VERSION="a6bf7154a743d4f74a1b377e730f188352a1b80c"
+  PKG_VERSION="775444287305849ebdf4736c75298ad0713e2d5d"  # v2.7.1
   PKG_TOOLCHAIN="cmake"
 
   PKG_CMAKE_OPTS_TARGET+=" -DENABLE_CEC=OFF"
@@ -44,9 +44,14 @@ else
   }
 fi
 
-if [[ "${DEVICE}" == RK* ]]
+# RK3588 is the only device whose kernel carries the vendor MPP service, and
+# CMake builds the MPP backend on merely finding rkmpp in the sysroot - so
+# anywhere else it produced a libmoonlight-rk.so that cannot open
+# /dev/mpp_service. The others use the software backend via ffmpeg. librga is
+# not referenced by the sources or by FindRockchip.cmake.
+if [[ "${DEVICE}" == RK3588* ]]
 then
-  PKG_DEPENDS_TARGET+=" librga rkmpp"
+  PKG_DEPENDS_TARGET+=" rkmpp"
 fi
 
 if [ ! "${OPENGL}" = "no" ]; then
