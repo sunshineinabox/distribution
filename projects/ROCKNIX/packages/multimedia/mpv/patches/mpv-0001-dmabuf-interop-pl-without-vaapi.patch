@@ -1,0 +1,44 @@
+hwdec_drmprime: build the libplacebo dmabuf interop without vaapi
+
+dmabuf_interop_pl.c is pure vulkan/libplacebo code (no libva reference
+in the file), but it is only compiled inside the vaapi feature block
+and hwdec_drmprime only lists it under HAVE_VAAPI - so on platforms
+whose hardware decoders produce DRM_PRIME frames without any vaapi
+(v4l2-request on ARM SoCs), the vulkan context has no dmabuf importer
+and zero-copy playback silently falls back to copy mode. Gate the
+interop on vaapi OR vulkan. Verified eligible on Mali-G52 (blob
+exposes VK_EXT_external_memory_dma_buf and
+VK_EXT_image_drm_format_modifier). Upstream candidate: mpv.
+
+diff -ruN a/meson.build b/meson.build
+--- a/meson.build	2026-08-15 09:53:48
++++ b/meson.build	2026-08-15 09:53:48
+@@ -1470,8 +1470,14 @@
+     dependencies += libva
+     sources += files('video/filter/vf_vavpp.c',
+                      'video/vaapi.c',
+-                     'video/out/hwdec/hwdec_vaapi.c',
+-                     'video/out/hwdec/dmabuf_interop_pl.c')
++                     'video/out/hwdec/hwdec_vaapi.c')
++endif
++
++# The libplacebo dmabuf interop is pure vulkan/libplacebo code with no libva
++# dependency; hwdec_drmprime needs it for zero-copy DRM_PRIME import under
++# vulkan on platforms without vaapi (e.g. v4l2-request decoders on ARM).
++if features['vaapi'] or features['vulkan']
++    sources += files('video/out/hwdec/dmabuf_interop_pl.c')
+ endif
+ 
+ features += {'dmabuf-interop-gl': features['egl'] and drm.found()}
+diff -ruN a/video/out/hwdec/hwdec_drmprime.c b/video/out/hwdec/hwdec_drmprime.c
+--- a/video/out/hwdec/hwdec_drmprime.c	2026-08-15 09:53:48
++++ b/video/out/hwdec/hwdec_drmprime.c	2026-08-15 09:53:48
+@@ -56,7 +56,7 @@
+ #if HAVE_DMABUF_INTEROP_GL
+     dmabuf_interop_gl_init,
+ #endif
+-#if HAVE_VAAPI
++#if HAVE_VAAPI || HAVE_VULKAN
+     dmabuf_interop_pl_init,
+ #endif
+ #if HAVE_DMABUF_WAYLAND

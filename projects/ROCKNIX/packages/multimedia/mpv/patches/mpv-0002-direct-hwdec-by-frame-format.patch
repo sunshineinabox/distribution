@@ -1,0 +1,74 @@
+vd_lavc: allow direct hwdec when the VO accepts the frame format
+
+For direct (non-copy) hwdecs, hwdec_create_dev only accepts a device
+published by the VO whose lavc device type matches the decoder's.
+v4l2-request decoders emit DRM_PRIME frames - which the drmprime
+interop maps happily - but the VO-side device is DRM-typed, so the
+lookup fails ('Could not create device.') and direct decode silently
+degrades to software even though every layer beneath works. If any VO
+device accepts the frame format, create the decoder's own standalone
+device, exactly as copy mode does. Verified on RG-DS/RK3566: chain
+healthy through 'Using EGL dmabuf interop via GL_OES_EGL_image', dies
+at exactly this lookup. Upstream candidate: mpv.
+
+diff -ruN a/video/decode/vd_lavc.c b/video/decode/vd_lavc.c
+--- a/video/decode/vd_lavc.c	2026-08-15 10:58:36
++++ b/video/decode/vd_lavc.c	2026-08-15 10:58:36
+@@ -487,6 +487,17 @@
+ 
+         if (hw_ctx && hw_ctx->av_device_ref)
+             return av_buffer_ref(hw_ctx->av_device_ref);
++
++        // The VO may accept the frame format while owning no device of the
++        // decoder's type: v4l2-request decoders emit DRM_PRIME frames that
++        // the drmprime interop maps, but the VO-side device is DRM. The
++        // interop is keyed on the frame format, so a standalone decoder
++        // device works exactly as it does in copy mode.
++        if (hwdec_devices_get_by_imgfmt(ctx->hwdec_devs, imgfmt)) {
++            AVBufferRef *ref = NULL;
++            av_hwdevice_ctx_create(&ref, hwdec->lavc_device, NULL, NULL, 0);
++            return ref;
++        }
+     }
+ 
+     return NULL;
+diff -ruN a/video/hwdec.c b/video/hwdec.c
+--- a/video/hwdec.c	2026-08-15 10:58:36
++++ b/video/hwdec.c	2026-08-15 10:58:36
+@@ -54,6 +54,22 @@
+     return res;
+ }
+ 
++struct mp_hwdec_ctx *hwdec_devices_get_by_imgfmt(struct mp_hwdec_devices *devs,
++                                                 int hw_imgfmt)
++{
++    struct mp_hwdec_ctx *res = NULL;
++    mp_mutex_lock(&devs->lock);
++    for (int n = 0; n < devs->num_hwctxs; n++) {
++        struct mp_hwdec_ctx *dev = devs->hwctxs[n];
++        if (dev->hw_imgfmt == hw_imgfmt) {
++            res = dev;
++            break;
++        }
++    }
++    mp_mutex_unlock(&devs->lock);
++    return res;
++}
++
+ struct mp_hwdec_ctx *hwdec_devices_get_first(struct mp_hwdec_devices *devs)
+ {
+     return hwdec_devices_get_n(devs, 0);
+diff -ruN a/video/hwdec.h b/video/hwdec.h
+--- a/video/hwdec.h	2026-08-15 10:58:36
++++ b/video/hwdec.h	2026-08-15 10:58:36
+@@ -55,6 +55,10 @@
+                                                           int hw_imgfmt,
+                                                           enum AVHWDeviceType device_type);
+ 
++// Any device accepting the given image format, regardless of device type.
++struct mp_hwdec_ctx *hwdec_devices_get_by_imgfmt(struct mp_hwdec_devices *devs,
++                                                 int hw_imgfmt);
++
+ // For code which still strictly assumes there is 1 (or none) device.
+ struct mp_hwdec_ctx *hwdec_devices_get_first(struct mp_hwdec_devices *devs);
+ 
