@@ -50,7 +50,7 @@ ensure_fex_rootfs() {
     log_info "FEX needs to download rootfs before starting Steam. This may take a while..."
     FEXRootFSFetcher --distro-name=arch --distro-version=rolling -y -x || die "Failed to fetch FEX RootFS."
   fi
-  cp -f "/usr/share/fex-emu/libvulkan_freedreno.so" "${FEX_ARCH_USR_LIB}" || die "Failed to copy libvulkan_freedreno.so."
+  cp -f "/usr/share/fex-emu/libvulkan_freedreno.so" "${FEX_ARCH_USR_LIB}" || die "Failed to install the x86_64 guest Vulkan driver: the image build guarantees /usr/share/fex-emu/libvulkan_freedreno.so exists, so either this image is broken (build bug) or the FEX rootfs at ${FEX_ARCH_USR_LIB} is missing or not writable."
   cp -f "/usr/share/fex-emu/liblsfg-vk-layer.so" "${FEX_ARCH_USR_LIB}"  || die "Failed to copy liblsfg-vk-layer.so."
   cp -f "/usr/share/vulkan/implicit_layer.d/VkLayer_LSFGVK_frame_generation.json" \
      "${FEX_ARCH_ROOT}/usr/share/vulkan/implicit_layer.d/" || die "Failed to copy VkLayer_LSFGVK_frame_generation.json to ArchLinux rootfs."

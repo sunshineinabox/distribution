@@ -6,8 +6,12 @@ PKG_VERSION="e869aa644a16e4332cdc15c1ea0b4d13d482385d"
 PKG_LICENSE="MIT"
 PKG_SITE="https://github.com/FEX-Emu/FEX"
 PKG_URL="https://github.com/FEX-Emu/FEX.git"
-PKG_DEPENDS_TARGET="toolchain llvm:host fex-emu:host squashfs-tools zlib squashfuse alsa-lib libxcb wayland libglvnd libdrm libX11 libXrandr xorgproto qt6"
+PKG_DEPENDS_TARGET="toolchain llvm:host fex-emu:host mesa:host squashfs-tools zlib squashfuse alsa-lib libxcb wayland libglvnd libdrm libX11 libXrandr xorgproto qt6"
 PKG_DEPENDS_HOST="toolchain:host llvm:host openssl:host"
+# reuse mesa's release tarball: on aarch64 build hosts make_target
+# cross-compiles the x86_64 guest turnip driver from it, and the unpack
+# dependency keeps this package's stamp in lockstep with mesa bumps
+PKG_DEPENDS_UNPACK+=" mesa"
 PKG_LONGDESC="FEX-Emu is a fast x86/x86-64 emulator for AArch64"
 PKG_TOOLCHAIN="manual"
 
@@ -129,6 +133,29 @@ make_target() {
   fi
   bash "${PKG_BUILD}/Data/nix/cmake_enable_libfwd.sh"
   ninja
+
+  # Guest x86_64 Vulkan driver (turnip): on an aarch64 build host the
+  # mesa:host pass produced an aarch64 libvulkan_freedreno.so, which the
+  # x86_64 FEX guest rootfs cannot load. Cross-compile the same mesa
+  # release for x86_64 with the pinned nix environment the thunks
+  # already use, so both builder architectures ship the same driver.
+  if [ "$(uname -m)" = "aarch64" ]; then
+    local mesa_version mesa_tarball vk_out
+    mesa_version="$(get_pkg_version mesa)"
+    mesa_tarball="${SOURCES}/mesa/$(get_pkg_variable mesa PKG_SOURCE_NAME)"
+    [ -f "${mesa_tarball}" ] || \
+      die "FEX guest vulkan: mesa source ${mesa_tarball} not found (should have been fetched via PKG_DEPENDS_UNPACK mesa)"
+    vk_out="${PKG_BUILD}/.${TARGET_NAME}/fex-guest-vulkan"
+    rm -rf "${vk_out}"
+    mkdir -p "${vk_out}"
+    nix-build "${PKG_DIR}/nix/guest-vulkan-freedreno.nix" \
+      --argstr mesaTarball "${mesa_tarball}" \
+      --argstr mesaVersion "${mesa_version}" \
+      --out-link "${vk_out}/result" || \
+      die "FEX guest vulkan: cross build of x86_64 libvulkan_freedreno.so failed"
+    install -m 0644 "${vk_out}/result/lib/libvulkan_freedreno.so" \
+      "${vk_out}/libvulkan_freedreno.so"
+  fi
 }
 
 makeinstall_target() {
@@ -139,7 +166,29 @@ makeinstall_target() {
   cp -rf "${PKG_DIR}/config/gptk" "${INSTALL}/usr/config/fex-emu"
   mkdir -p "${INSTALL}/usr/config/modules"
   cp -rf "${PKG_DIR}/scripts/"* "${INSTALL}/usr/config/modules"
-  cp "${TOOLCHAIN}/lib/libvulkan_freedreno.so" "${INSTALL}/usr/share/fex-emu/"
+  # Install Steam.sh drops this into the ArchLinux guest rootfs, which is
+  # x86_64, and relies on it being in the image, so an x86_64 driver must
+  # always ship. One producer per build-host architecture:
+  #   x86_64 host:  the mesa:host pass built an x86_64 libvulkan_freedreno.so
+  #   aarch64 host: make_target cross-compiled it with the pinned nix env
+  # The machine check is now a guarantee: fail the build rather than ship
+  # an image whose Steam has no Vulkan driver.
+  local vk
+  if [ "$(uname -m)" = "aarch64" ]; then
+    vk="${PKG_BUILD}/.${TARGET_NAME}/fex-guest-vulkan/libvulkan_freedreno.so"
+  else
+    vk="${TOOLCHAIN}/lib/libvulkan_freedreno.so"
+  fi
+  local vk_machine="$(readelf -h "${vk}" 2>/dev/null | sed -n 's/^ *Machine: *//p')"
+  case "${vk_machine}" in
+    *X86-64*|*x86-64*)
+      mkdir -p "${INSTALL}/usr/share/fex-emu"
+      cp "${vk}" "${INSTALL}/usr/share/fex-emu/"
+      ;;
+    *)
+      die "FEX guest vulkan: ${vk} is ${vk_machine:-missing/unreadable}, expected x86-64.\nThe FEX guest rootfs is x86_64 and Install Steam.sh depends on this driver;\nrefusing to produce an image without it."
+      ;;
+  esac
 }
 
 makeinstall_host() {
