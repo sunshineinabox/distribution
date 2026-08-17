@@ -1,0 +1,27 @@
+Subject: [PATCH] cpufreq: qcom-hw: enable boost frequencies by default
+
+capacity_freq_ref is latched from cpuinfo.max_freq on
+CPUFREQ_CREATE_POLICY and never revisited, and schedutil maps
+at that anchor, so enabling boost later cannot make the boost 
+level reachable.
+
+---
+diff --git a/drivers/cpufreq/qcom-cpufreq-hw.c b/drivers/cpufreq/qcom-cpufreq-hw.c
+--- a/drivers/cpufreq/qcom-cpufreq-hw.c
++++ b/drivers/cpufreq/qcom-cpufreq-hw.c
+@@ -552,6 +552,7 @@
+ 
+ 	policy->driver_data = data;
+ 	policy->dvfs_possible_from_any_cpu = true;
++	policy->boost_enabled = true;
+ 	data->policy = policy;
+ 
+ 	ret = qcom_cpufreq_hw_read_lut(cpu_dev, policy);
+@@ -605,6 +606,7 @@
+ 	.name		= "qcom-cpufreq-hw",
+ 	.ready		= qcom_cpufreq_ready,
+ 	.set_boost	= cpufreq_boost_set_sw,
++	.boost_enabled	= true,
+ };
+ 
+ static unsigned long qcom_cpufreq_hw_recalc_rate(struct clk_hw *hw, unsigned long parent_rate)

@@ -1,0 +1,33 @@
+Subject: [PATCH] cpufreq: honour recomputed ceiling when clearing boost
+
+---
+diff --git a/drivers/cpufreq/cpufreq.c b/drivers/cpufreq/cpufreq.c
+--- a/drivers/cpufreq/cpufreq.c
++++ b/drivers/cpufreq/cpufreq.c
+@@ -601,6 +601,7 @@
+ 
+ static int policy_set_boost(struct cpufreq_policy *policy, bool enable)
+ {
++	unsigned int max_freq;
+ 	int ret;
+ 
+ 	if (policy->boost_enabled == enable)
+@@ -614,7 +615,17 @@
+ 		return ret;
+ 	}
+ 
+-	ret = freq_qos_update_request(&policy->boost_freq_req, policy->cpuinfo.max_freq);
++	/*
++	 * cpuinfo.max_freq never decreases once raised, so on the software
++	 * boost path take the ceiling ->set_boost has just recomputed;
++	 * otherwise disabling boost would leave it pinned at the boost OPP.
++	 */
++	if (cpufreq_driver->set_boost == cpufreq_boost_set_sw)
++		max_freq = policy->max;
++	else
++		max_freq = policy->cpuinfo.max_freq;
++
++	ret = freq_qos_update_request(&policy->boost_freq_req, max_freq);
+ 	if (ret < 0) {
+ 		policy->boost_enabled = !policy->boost_enabled;
+ 		cpufreq_driver->set_boost(policy, policy->boost_enabled);

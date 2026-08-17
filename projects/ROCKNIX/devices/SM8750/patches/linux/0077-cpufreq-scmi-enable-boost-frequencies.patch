@@ -1,0 +1,27 @@
+Subject: [PATCH] cpufreq: scmi: enable boost frequencies by default
+
+capacity_freq_ref is latched from cpuinfo.max_freq on
+CPUFREQ_CREATE_POLICY and never revisited, and schedutil maps
+at that anchor, so enabling boost later cannot make the boost 
+level reachable.
+
+---
+diff --git a/drivers/cpufreq/scmi-cpufreq.c b/drivers/cpufreq/scmi-cpufreq.c
+--- a/drivers/cpufreq/scmi-cpufreq.c
++++ b/drivers/cpufreq/scmi-cpufreq.c
+@@ -289,6 +289,7 @@
+ 
+ 	policy->driver_data = priv;
+ 	policy->freq_table = freq_table;
++	policy->boost_enabled = true;
+ 
+ 	/* SCMI allows DVFS request for any domain from any CPU */
+ 	policy->dvfs_possible_from_any_cpu = true;
+@@ -393,6 +394,7 @@
+ 	.exit	= scmi_cpufreq_exit,
+ 	.register_em	= scmi_cpufreq_register_em,
+ 	.set_boost	= cpufreq_boost_set_sw,
++	.boost_enabled	= true,
+ };
+ 
+ static bool scmi_dev_used_by_cpus(struct device *scmi_dev)
