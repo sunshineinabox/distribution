@@ -2,5 +2,10 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (C) 2024 ROCKNIX (https://github.com/ROCKNIX)
 
-# Disable cpu0 idle state 1, seems to cause GMU issues
-echo 1 > /sys/devices/system/cpu/cpu0/cpuidle/state1/disable
+# Disable cpu0 rail power collapse, seems to cause GMU issues.
+# Match on the state name rather than the index.
+for state in /sys/devices/system/cpu/cpu0/cpuidle/state*; do
+  case "$(cat "${state}/desc" 2>/dev/null)" in
+    *rail-power-collapse*) echo 1 > "${state}/disable" ;;
+  esac
+done
