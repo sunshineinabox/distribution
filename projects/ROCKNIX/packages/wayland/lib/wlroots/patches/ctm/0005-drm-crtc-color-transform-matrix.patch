@@ -1,0 +1,260 @@
+wlroots/drm: add CRTC colour transform matrix support
+
+--- a/include/wlr/types/wlr_output.h
++++ b/include/wlr/types/wlr_output.h
+@@ -74,6 +74,7 @@
+ 	WLR_OUTPUT_STATE_LAYERS = 1 << 10,
+ 	WLR_OUTPUT_STATE_WAIT_TIMELINE = 1 << 11,
+ 	WLR_OUTPUT_STATE_SIGNAL_TIMELINE = 1 << 12,
++	WLR_OUTPUT_STATE_CTM = 1 << 13,
+ };
+ 
+ enum wlr_output_state_mode_type {
+@@ -124,6 +125,10 @@
+ 
+ 	uint16_t *gamma_lut;
+ 	size_t gamma_lut_size;
++
++	// Color transformation matrix, 3x3 in row-major order, applied to the
++	// blended output as out[i] = sum(ctm[i * 3 + j] * in[j]).
++	float ctm[9];
+ 
+ 	struct wlr_output_layer_state *layers;
+ 	size_t layers_len;
+@@ -179,6 +184,10 @@
+ 	// true, changes may either succeed or fail.
+ 	bool adaptive_sync_supported;
+ 
++	// Indicates whether a color transformation matrix can be applied by the
++	// display hardware. 
++	bool ctm_supported;
++
+ 	bool needs_frame;
+ 	// damage for cursors and fullscreen surface, in output-local coordinates
+ 	bool frame_pending;
+@@ -538,6 +547,17 @@
+  */
+ bool wlr_output_state_set_gamma_lut(struct wlr_output_state *state,
+ 	size_t ramp_size, const uint16_t *r, const uint16_t *g, const uint16_t *b);
++/**
++ * Sets the color transformation matrix for an output. `matrix` 
++ * is a 3x3 matrix which is applied to the blended output after the gamma
++ * table. Passing null resets it to the identity matrix.
++ *
++ * Only supported when CTM supported is true.
++ *
++ * This state will be applied once commit state is called.
++ */
++void wlr_output_state_set_ctm(struct wlr_output_state *state,
++	const float *matrix);
+ /**
+  * Sets the damage region for an output. This is used as a hint to the backend
+  * and can be used to reduce power consumption or increase performance on some
+--- a/types/output/state.c
++++ b/types/output/state.c
+@@ -110,6 +110,18 @@
+ 	return true;
+ }
+ 
++void wlr_output_state_set_ctm(struct wlr_output_state *state,
++		const float *matrix) {
++	static const float identity[9] = {
++		1.0f, 0.0f, 0.0f,
++		0.0f, 1.0f, 0.0f,
++		0.0f, 0.0f, 1.0f,
++	};
++
++	memcpy(state->ctm, matrix != NULL ? matrix : identity, sizeof(state->ctm));
++	state->committed |= WLR_OUTPUT_STATE_CTM;
++}
++
+ void wlr_output_state_set_layers(struct wlr_output_state *state,
+ 		struct wlr_output_layer_state *layers, size_t layers_len) {
+ 	state->committed |= WLR_OUTPUT_STATE_LAYERS;
+--- a/include/backend/drm/drm.h
++++ b/include/backend/drm/drm.h
+@@ -74,6 +74,7 @@
+ 	bool own_mode_id;
+ 	uint32_t mode_id;
+ 	uint32_t gamma_lut;
++	uint32_t ctm;
+ 
+ 	// Legacy only
+ 	int legacy_gamma_size;
+@@ -155,6 +156,7 @@
+ 	// used by atomic
+ 	uint32_t mode_id;
+ 	uint32_t gamma_lut;
++	uint32_t ctm;
+ 	uint32_t fb_damage_clips;
+ 	int primary_in_fence_fd, out_fence_fd;
+ 	bool vrr_enabled;
+--- a/include/backend/drm/properties.h
++++ b/include/backend/drm/properties.h
+@@ -33,6 +33,7 @@
+ 	uint32_t vrr_enabled;
+ 	uint32_t gamma_lut;
+ 	uint32_t gamma_lut_size;
++	uint32_t ctm;
+ 
+ 	// atomic-modesetting only
+ 
+--- a/backend/drm/properties.c
++++ b/backend/drm/properties.c
+@@ -38,6 +38,7 @@
+ static const struct prop_info crtc_info[] = {
+ #define INDEX(name) (offsetof(struct wlr_drm_crtc_props, name) / sizeof(uint32_t))
+ 	{ "ACTIVE", INDEX(active) },
++	{ "CTM", INDEX(ctm) },
+ 	{ "GAMMA_LUT", INDEX(gamma_lut) },
+ 	{ "GAMMA_LUT_SIZE", INDEX(gamma_lut_size) },
+ 	{ "MODE_ID", INDEX(mode_id) },
+--- a/backend/drm/atomic.c
++++ b/backend/drm/atomic.c
+@@ -152,6 +152,35 @@
+ 	return true;
+ }
+ 
++static bool create_ctm_blob(struct wlr_drm_backend *drm,
++		const float matrix[static 9], uint32_t *blob_id) {
++	struct drm_color_ctm ctm = {0};
++
++	for (size_t i = 0; i < 9; i++) {
++		double val = matrix[i];
++		bool negative = val < 0;
++		if (negative) {
++			val = -val;
++		}
++		if (val >= (double)(1ULL << 31)) {
++			wlr_log(WLR_ERROR, "CTM coefficient out of range");
++			return false;
++		}
++
++		ctm.matrix[i] = (uint64_t)(val * (double)(1ULL << 32));
++		if (negative) {
++			ctm.matrix[i] |= 1ULL << 63;
++		}
++	}
++
++	if (drmModeCreatePropertyBlob(drm->fd, &ctm, sizeof(ctm), blob_id) != 0) {
++		wlr_log_errno(WLR_ERROR, "Unable to create CTM property blob");
++		return false;
++	}
++
++	return true;
++}
++
+ bool create_fb_damage_clips_blob(struct wlr_drm_backend *drm,
+ 		int width, int height, const pixman_region32_t *damage, uint32_t *blob_id) {
+ 	pixman_region32_t clipped;
+@@ -269,6 +299,13 @@
+ 		}
+ 	}
+ 
++	uint32_t ctm = crtc->ctm;
++	if (state->base->committed & WLR_OUTPUT_STATE_CTM) {
++		if (!create_ctm_blob(drm, state->base->ctm, &ctm)) {
++			return false;
++		}
++	}
++
+ 	uint32_t fb_damage_clips = 0;
+ 	if ((state->base->committed & WLR_OUTPUT_STATE_DAMAGE) &&
+ 			crtc->primary->props.fb_damage_clips != 0) {
+@@ -297,6 +334,7 @@
+ 
+ 	state->mode_id = mode_id;
+ 	state->gamma_lut = gamma_lut;
++	state->ctm = ctm;
+ 	state->fb_damage_clips = fb_damage_clips;
+ 	state->primary_in_fence_fd = in_fence_fd;
+ 	state->vrr_enabled = vrr_enabled;
+@@ -314,6 +352,7 @@
+ 	crtc->own_mode_id = true;
+ 	commit_blob(drm, &crtc->mode_id, state->mode_id);
+ 	commit_blob(drm, &crtc->gamma_lut, state->gamma_lut);
++	commit_blob(drm, &crtc->ctm, state->ctm);
+ 
+ 	conn->output.adaptive_sync_status = state->vrr_enabled ?
+ 		WLR_OUTPUT_ADAPTIVE_SYNC_ENABLED : WLR_OUTPUT_ADAPTIVE_SYNC_DISABLED;
+@@ -337,6 +376,7 @@
+ 
+ 	rollback_blob(drm, &crtc->mode_id, state->mode_id);
+ 	rollback_blob(drm, &crtc->gamma_lut, state->gamma_lut);
++	rollback_blob(drm, &crtc->ctm, state->ctm);
+ 
+ 	destroy_blob(drm, state->fb_damage_clips);
+ 	if (state->primary_in_fence_fd >= 0) {
+@@ -434,6 +474,9 @@
+ 		if (crtc->props.gamma_lut != 0) {
+ 			atomic_add(atom, crtc->id, crtc->props.gamma_lut, state->gamma_lut);
+ 		}
++		if (crtc->props.ctm != 0) {
++			atomic_add(atom, crtc->id, crtc->props.ctm, state->ctm);
++		}
+ 		if (crtc->props.vrr_enabled != 0) {
+ 			atomic_add(atom, crtc->id, crtc->props.vrr_enabled, state->vrr_enabled);
+ 		}
+--- a/backend/drm/drm.c
++++ b/backend/drm/drm.c
+@@ -38,6 +38,7 @@
+ 	WLR_OUTPUT_STATE_MODE |
+ 	WLR_OUTPUT_STATE_ENABLED |
+ 	WLR_OUTPUT_STATE_GAMMA_LUT |
++	WLR_OUTPUT_STATE_CTM |
+ 	WLR_OUTPUT_STATE_ADAPTIVE_SYNC_ENABLED |
+ 	WLR_OUTPUT_STATE_LAYERS |
+ 	WLR_OUTPUT_STATE_WAIT_TIMELINE |
+@@ -388,6 +389,9 @@
+ 		if (crtc->gamma_lut) {
+ 			drmModeDestroyPropertyBlob(drm->fd, crtc->gamma_lut);
+ 		}
++		if (crtc->ctm) {
++			drmModeDestroyPropertyBlob(drm->fd, crtc->ctm);
++		}
+ 	}
+ 
+ 	free(drm->crtcs);
+@@ -837,6 +841,12 @@
+ 			!output->adaptive_sync_supported) {
+ 		wlr_drm_conn_log(conn, WLR_DEBUG,
+ 				"Can't enable adaptive sync: connector doesn't support VRR");
++		return false;
++	}
++
++	if ((state->committed & WLR_OUTPUT_STATE_CTM) && !output->ctm_supported) {
++		wlr_drm_conn_log(conn, WLR_DEBUG,
++				"Can't set CTM: CRTC doesn't support it");
+ 		return false;
+ 	}
+ 
+@@ -1699,6 +1709,17 @@
+ 	}
+ 	output->adaptive_sync_supported = vrr_capable;
+ 
++	// The CRTC is allocated lazily, so advertise CTM support if every CRTC
++	// carries the property. Legacy modesetting cannot set it at all.
++	bool ctm_supported = drm->iface == &atomic_iface && drm->num_crtcs > 0;
++	for (size_t i = 0; i < drm->num_crtcs; i++) {
++		if (drm->crtcs[i].props.ctm == 0) {
++			ctm_supported = false;
++			break;
++		}
++	}
++	output->ctm_supported = ctm_supported;
++
+ 	size_t edid_len = 0;
+ 	uint8_t *edid = get_drm_prop_blob(drm->fd,
+ 		wlr_conn->id, wlr_conn->props.edid, &edid_len);
+--- a/backend/drm/libliftoff.c
++++ b/backend/drm/libliftoff.c
+@@ -328,6 +328,9 @@
+ 		if (crtc->props.gamma_lut != 0) {
+ 			ok = ok && add_prop(req, crtc->id, crtc->props.gamma_lut, state->gamma_lut);
+ 		}
++		if (crtc->props.ctm != 0) {
++			ok = ok && add_prop(req, crtc->id, crtc->props.ctm, state->ctm);
++		}
+ 		if (crtc->props.vrr_enabled != 0) {
+ 			ok = ok && add_prop(req, crtc->id, crtc->props.vrr_enabled, state->vrr_enabled);
+ 		}

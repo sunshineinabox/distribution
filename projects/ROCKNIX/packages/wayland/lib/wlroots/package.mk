@@ -13,7 +13,7 @@ case ${DEVICE} in
     # despite the '-rk' indication this is a wlroots version with libmali hacks
     PKG_VERSION="0.19.3-rk"
     PKG_SHA256="5385dc105f2c4c5fe3157e0b0299d6508765086d605fe4efe3ae437d4f18a5d9"
-    PKG_PATCH_DIRS+=" libmali"
+    PKG_PATCH_DIRS+=" libmali ctm"
     PKG_URL="https://github.com/rocknix/rockchip-wlroots/archive/refs/tags/${PKG_VERSION}.tar.gz"
     ;;
   RK3588)
@@ -24,6 +24,7 @@ case ${DEVICE} in
   *)
     PKG_VERSION="0.19.3"
     PKG_SHA256="a6ff89b64ea15e424d1b0db4a22145fccf5ec2ff2e7b8af0fa35e2ac8975986f"
+    PKG_PATCH_DIRS+=" ctm"
     PKG_URL="${PKG_SITE}/-/archive/${PKG_VERSION}/wlroots-${PKG_VERSION}.tar.gz"
     ;;
 esac

@@ -1,0 +1,163 @@
+sway: add output color_matrix command
+
+--- a/include/sway/commands.h
++++ b/include/sway/commands.h
+@@ -286,6 +286,7 @@
+ sway_cmd output_cmd_adaptive_sync;
+ sway_cmd output_cmd_allow_tearing;
+ sway_cmd output_cmd_background;
++sway_cmd output_cmd_color_matrix;
+ sway_cmd output_cmd_color_profile;
+ sway_cmd output_cmd_disable;
+ sway_cmd output_cmd_dpms;
+--- a/include/sway/config.h
++++ b/include/sway/config.h
+@@ -290,6 +290,8 @@
+ 	enum render_bit_depth render_bit_depth;
+ 	bool set_color_transform;
+ 	struct wlr_color_transform *color_transform;
++	bool set_color_matrix;
++	float color_matrix[9];
+ 	int allow_tearing;
+ 
+ 	char *background;
+--- a/sway/commands/output.c
++++ b/sway/commands/output.c
+@@ -11,6 +11,7 @@
+ 	{ "allow_tearing", output_cmd_allow_tearing },
+ 	{ "background", output_cmd_background },
+ 	{ "bg", output_cmd_background },
++	{ "color_matrix", output_cmd_color_matrix },
+ 	{ "color_profile", output_cmd_color_profile },
+ 	{ "disable", output_cmd_disable },
+ 	{ "dpms", output_cmd_dpms },
+--- /dev/null
++++ b/sway/commands/output/color_matrix.c
+@@ -0,0 +1,53 @@
++#include <math.h>
++#include <stdlib.h>
++#include <string.h>
++#include <strings.h>
++#include "sway/commands.h"
++#include "sway/config.h"
++
++struct cmd_results *output_cmd_color_matrix(int argc, char **argv) {
++	if (!config->handler_context.output_config) {
++		return cmd_results_new(CMD_FAILURE, "Missing output config");
++	}
++	if (!argc) {
++		return cmd_results_new(CMD_INVALID, "Missing color_matrix argument");
++	}
++
++	struct output_config *oc = config->handler_context.output_config;
++	static const float identity[9] = {
++		1.0f, 0.0f, 0.0f,
++		0.0f, 1.0f, 0.0f,
++		0.0f, 0.0f, 1.0f,
++	};
++
++	if (strcasecmp(argv[0], "none") == 0) {
++		memcpy(oc->color_matrix, identity, sizeof(oc->color_matrix));
++		oc->set_color_matrix = true;
++
++		config->handler_context.leftovers.argc = argc - 1;
++		config->handler_context.leftovers.argv = argv + 1;
++		return NULL;
++	}
++
++	if (argc < 9) {
++		return cmd_results_new(CMD_INVALID,
++			"color_matrix requires 9 coefficients in row-major order, or none");
++	}
++
++	float matrix[9];
++	for (int i = 0; i < 9; i++) {
++		char *end;
++		matrix[i] = strtof(argv[i], &end);
++		if (*argv[i] == '\0' || *end != '\0' || !isfinite(matrix[i])) {
++			return cmd_results_new(CMD_INVALID,
++				"Invalid color_matrix coefficient '%s'", argv[i]);
++		}
++	}
++
++	memcpy(oc->color_matrix, matrix, sizeof(oc->color_matrix));
++	oc->set_color_matrix = true;
++
++	config->handler_context.leftovers.argc = argc - 9;
++	config->handler_context.leftovers.argv = argv + 9;
++	return NULL;
++}
+--- a/sway/config/output.c
++++ b/sway/config/output.c
+@@ -77,6 +77,7 @@
+ 	oc->render_bit_depth = RENDER_BIT_DEPTH_DEFAULT;
+ 	oc->set_color_transform = false;
+ 	oc->color_transform = NULL;
++	oc->set_color_matrix = false;
+ 	oc->power = -1;
+ 	oc->allow_tearing = -1;
+ 	return oc;
+@@ -136,6 +137,9 @@
+ 		}
+ 		dst->set_color_transform = false;
+ 	}
++	if (src->set_color_matrix) {
++		dst->set_color_matrix = false;
++	}
+ 	if (src->background) {
+ 		free(dst->background);
+ 		dst->background = NULL;
+@@ -210,6 +214,11 @@
+ 		wlr_color_transform_unref(dst->color_transform);
+ 		dst->set_color_transform = true;
+ 		dst->color_transform = src->color_transform;
++	}
++	if (src->set_color_matrix) {
++		dst->set_color_matrix = true;
++		memcpy(dst->color_matrix, src->color_matrix,
++			sizeof(dst->color_matrix));
+ 	}
+ 	if (src->background) {
+ 		free(dst->background);
+@@ -482,7 +491,18 @@
+ 			wlr_output_state_set_adaptive_sync_enabled(pending, oc->adaptive_sync == 1);
+ 		} else {
+ 			wlr_output_state_set_adaptive_sync_enabled(pending, false);
++		}
++	}
++
++	if (wlr_output->ctm_supported) {
++		if (oc && oc->set_color_matrix) {
++			wlr_output_state_set_ctm(pending, oc->color_matrix);
++		} else {
++			wlr_output_state_set_ctm(pending, NULL);
+ 		}
++	} else if (oc && oc->set_color_matrix) {
++		sway_log(SWAY_INFO, "Output %s does not support a color matrix",
++			wlr_output->name);
+ 	}
+ 
+ 	if (oc && oc->render_bit_depth != RENDER_BIT_DEPTH_DEFAULT) {
+--- a/sway/meson.build
++++ b/sway/meson.build
+@@ -206,6 +206,7 @@
+ 	'commands/output/toggle.c',
+ 	'commands/output/transform.c',
+ 	'commands/output/unplug.c',
++	'commands/output/color_matrix.c',
+ 	'commands/output/color_profile.c',
+ 
+ 	'tree/arrange.c',
+--- a/sway/sway-output.5.scd
++++ b/sway/sway-output.5.scd
+@@ -178,6 +178,10 @@
+ 	updated to work with different bit depths. This command is experimental,
+ 	and may be removed or changed in the future.
+ 
++*output* <name> color_matrix <m00> <m01> <m02> <m10> <m11> <m12> <m20> <m21> <m22>|none
++	Sets a 3x3 color transformation matrix applied by the
++	display hardware to the blended output: out[i] = sum(m[i][j] * in[j]).
++
+ *output* <name> color_profile srgb|[icc <file>]
+ 	Sets the color profile for an output. The default is _srgb_. <file> should be a
+ 	path to a display ICC profile.
