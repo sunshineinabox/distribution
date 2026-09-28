@@ -4,6 +4,10 @@
 # GOLD (Google Linker) support
   GOLD_SUPPORT="yes"
 
+# MOLD (Modern Linker) support, used as the default target linker
+  MOLD_SUPPORT="yes"
+  DEFAULT_LINKER="mold"
+
 # HARDENING (security relevant linker and compiler flags) support
   HARDENING_SUPPORT="no"
 
