@@ -28,10 +28,11 @@ else
   PKG_MESON_OPTS_TARGET+=" -Dwayland=disabled"
 fi
 
-PKG_MESON_OPTS_TARGET+=" -Dsdl2-gamepad=enabled"
-
 # Vulkan has issues on S922X so disable
 [ "${DEVICE}" == "S922X" ] && PKG_MESON_OPTS_TARGET+=" -Dvulkan=disabled"
+
+# 0.41 dropped -Dsdl2, so name the features to make a missing SDL2 an error
+PKG_MESON_OPTS_TARGET+=" -Dsdl2-audio=enabled -Dsdl2-video=enabled -Dsdl2-gamepad=enabled"
 
 post_makeinstall_target() {
   cp ${PKG_DIR}/scripts/* ${INSTALL}/usr/bin
