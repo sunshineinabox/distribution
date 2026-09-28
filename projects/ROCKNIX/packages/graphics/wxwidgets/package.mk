@@ -11,4 +11,6 @@ PKG_LONGDESC="wxWidgets is a free and open source cross-platform C++ framework f
 
 pre_configure_target(){
   PKG_CMAKE_OPTS_TARGET+=" -DCMAKE_SYSROOT=${SYSROOT_PREFIX} -DCMAKE_POLICY_VERSION_MINIMUM=3.5"
+  # wxSound is unused, and linking SDL3 clashes with SDL2 consumers such as cemu
+  PKG_CMAKE_OPTS_TARGET+=" -DwxUSE_LIBSDL=OFF"
 }
