@@ -2,7 +2,7 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="tic80-lr"
-PKG_VERSION="7020500a6e88f6ee91301933bb77f082a10e10f5"
+PKG_VERSION="afd4b55f66f58e1f786266c9c3d2e1d84a7f2fff"
 PKG_LICENSE="MIT"
 PKG_SITE="https://github.com/nesbox/TIC-80"
 PKG_URL="${PKG_SITE}.git"
