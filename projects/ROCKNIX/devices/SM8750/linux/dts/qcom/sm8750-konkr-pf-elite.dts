@@ -1527,6 +1527,16 @@
 			cpu { sound-dai = <&q6apmbedai TX_CODEC_DMA_TX_3>; };
 			platform { sound-dai = <&q6apm>; };
 		};
+
+		/* USB-C DP alt mode audio; also creates the "DP0 Jack" control
+		 * the UCM HDMI device keys off. Needs a DISPLAY_PORT_RX_0 graph
+		 * in the topology blob. */
+		dp-dai-link {
+			link-name = "DisplayPort Playback";
+			codec { sound-dai = <&mdss_dp0>; };
+			cpu { sound-dai = <&q6apmbedai DISPLAY_PORT_RX_0>; };
+			platform { sound-dai = <&q6apm>; };
+		};
 	};
 
 	wcn7860-pmu {
