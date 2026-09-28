@@ -628,6 +628,12 @@
 			regulator-allow-set-load;
 			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
 						   RPMH_REGULATOR_MODE_HPM>;
+
+			/* The codec keeps this rail enabled through sleep; idle it in LPM */
+			regulator-state-mem {
+				regulator-on-in-suspend;
+				regulator-mode = <RPMH_REGULATOR_MODE_LPM>;
+			};
 		};
 
 		vreg_l11b_1p2: ldo11 {

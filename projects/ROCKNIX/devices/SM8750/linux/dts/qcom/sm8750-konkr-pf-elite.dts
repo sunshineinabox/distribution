@@ -1709,3 +1709,25 @@
 			"qcom/sm8750/konkr/pfe/cdsp_dtb.mbn";
 	status = "okay";
 };
+
+/* The codec keeps these rails enabled through sleep; idle them in LPM */
+&vreg_l15b_1p8 {
+	regulator-state-mem {
+		regulator-on-in-suspend;
+		regulator-mode = <RPMH_REGULATOR_MODE_LPM>;
+	};
+};
+
+&vreg_bob1 {
+	regulator-state-mem {
+		regulator-on-in-suspend;
+		regulator-mode = <RPMH_REGULATOR_MODE_LPM>;
+	};
+};
+
+&vreg_l2i_1p2 {
+	regulator-state-mem {
+		regulator-on-in-suspend;
+		regulator-mode = <RPMH_REGULATOR_MODE_LPM>;
+	};
+};
