@@ -2,14 +2,14 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="dolphin-sa"
-PKG_VERSION="6094cfcf7b8fba733b3116fdf3414d51c1c0e4a4" #2606
+PKG_VERSION="f84df02055ab9610feec48e65648cac5a3c098fa" #2609
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/dolphin-emu/dolphin"
 PKG_URL="${PKG_SITE}.git"
 PKG_DEPENDS_TARGET="toolchain libevdev libdrm ffmpeg zlib libpng lzo libusb zstd ecm openal-soft pulseaudio alsa-lib libfmt hidapi curl SDL3 qt6"
 PKG_LONGDESC="Dolphin is a GameCube / Wii / Triforce emulator, allowing you to play games for these two platforms on PC with improvements. "
 
-PKG_DOLPHIN_VERSION_MAJOR="2606"
+PKG_DOLPHIN_VERSION_MAJOR="2609"
 PKG_DOLPHIN_VERSION_MINOR="1"
 
 if [ "${OPENGL_SUPPORT}" = "yes" ]; then
@@ -55,7 +55,6 @@ PKG_CMAKE_OPTS_TARGET+=" -DENABLE_QT=ON \
                          -DENABLE_SDL=ON \
                          -DUSE_DISCORD_PRESENCE=OFF \
                          -DBUILD_SHARED_LIBS=OFF \
-                         -DLINUX_LOCAL_DEV=OFF \
                          -DENABLE_PULSEAUDIO=ON \
                          -DENABLE_ALSA=ON \
                          -DENABLE_TESTS=OFF \
