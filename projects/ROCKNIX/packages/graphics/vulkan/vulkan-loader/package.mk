@@ -4,6 +4,7 @@
 . ${ROOT}/packages/graphics/vulkan/vulkan-loader/package.mk
 
 PKG_DEPENDS_TARGET+=" libxcb libX11 libXrandr"
+PKG_BUILD_FLAGS="+lto +speed"
 
 pre_configure_target() {
   PKG_CMAKE_OPTS_TARGET="-DBUILD_TESTS=OFF \

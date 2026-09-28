@@ -11,6 +11,7 @@ PKG_URL="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-${PKG_VERSION}/
 PKG_DEPENDS_HOST="toolchain:host expat:host libclc:host libdrm:host llvm:host Mako:host pyyaml:host spirv-tools:host"
 PKG_DEPENDS_TARGET="toolchain expat libdrm Mako:host pyyaml:host"
 PKG_LONGDESC="Mesa is a 3-D graphics library with an API."
+PKG_BUILD_FLAGS="+speed"
 PKG_PATCH_DIRS+=" ${DEVICE}"
 
 get_graphicdrivers
