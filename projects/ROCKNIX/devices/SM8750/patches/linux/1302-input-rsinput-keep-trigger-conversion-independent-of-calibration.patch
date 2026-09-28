@@ -1,0 +1,45 @@
+From: Davide <davide.nardi-1@studenti.unitn.it>
+Subject: [PATCH] input: rsinput: keep trigger conversion independent of calibration
+
+The MCU reports descending trigger readings from a fixed release
+reference. trigger_*_max is the calibrated evdev range, but it was also
+used as that reference, so calibrating shifted every sample as well as
+the range: full travel could not reach the maximum and repeated
+calibration made it worse. Convert against the fixed reference and let
+the calibrated maximum describe the travel only.
+
+Ported from Armada: https://github.com/armada-os/armada/commit/c44fee292d5fa5adb339d4fb08301f050c19c523
+---
+--- a/drivers/input/joystick/rsinput.c
++++ b/drivers/input/joystick/rsinput.c
+@@ -22,11 +22,14 @@
+ 
+ static int update_params=0;
+ 
+-static int trigger_left_max=0x610;
++/* MCU trigger release reference, independent of the calibrated maximum */
++#define RSINPUT_TRIGGER_RELEASE 0x610
++
++static int trigger_left_max=RSINPUT_TRIGGER_RELEASE;
+ static int trigger_left_deadzone=0x0;
+ static int trigger_left_antideadzone=0x0;
+ 
+-static int trigger_right_max=0x610;
++static int trigger_right_max=RSINPUT_TRIGGER_RELEASE;
+ static int trigger_right_deadzone=0x0;
+ static int trigger_right_antideadzone=0x0;
+ 
+@@ -290,11 +293,11 @@
+     }
+ 
+     int16_t raw_trig_l = (data[FRAME_POS_DATA_3] | (data[FRAME_POS_DATA_4] << 8));
+-    int16_t z = trigger_left_max - raw_trig_l;
++    int16_t z = RSINPUT_TRIGGER_RELEASE - raw_trig_l;
+     z = ( z < trigger_left_deadzone ) ? 0 : z - trigger_left_antideadzone;
+ 
+     int16_t raw_trig_r = (data[FRAME_POS_DATA_5] | (data[FRAME_POS_DATA_6] << 8));
+-    int16_t rz = trigger_right_max - raw_trig_r;
++    int16_t rz = RSINPUT_TRIGGER_RELEASE - raw_trig_r;
+     rz = ( rz < trigger_right_deadzone ) ? 0 : rz - trigger_right_antideadzone;
+ 
+     int16_t raw_x = -(int16_t)(data[FRAME_POS_DATA_7] | (data[FRAME_POS_DATA_8] << 8));
