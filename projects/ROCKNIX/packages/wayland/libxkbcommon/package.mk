@@ -1,27 +1,17 @@
-# SPDX-License-Identifier: GPL-2.0-or-later
-# Copyright (C) 2009-2016 Stephan Raue (stephan@openelec.tv)
-# Copyright (C) 2019-present Team LibreELEC (https://libreelec.tv)
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2018-present Team LibreELEC (https://libreelec.tv)
 
-PKG_NAME="libxkbcommon"
-PKG_VERSION="1.8.0"
-PKG_SHA256="025c53032776ed850fbfb92683a703048cd70256df4ac1a1ec41ed3455d5d39c"
-PKG_LICENSE="MIT"
-PKG_SITE="https://xkbcommon.org"
-PKG_URL="https://github.com/xkbcommon/libxkbcommon/archive/refs/tags/xkbcommon-${PKG_VERSION}.tar.gz"
-PKG_DEPENDS_TARGET="toolchain xkeyboard-config libxml2 libXau libxcb"
-PKG_LONGDESC="xkbcommon is a library to handle keyboard descriptions."
+. ${ROOT}/packages/wayland/libxkbcommon/package.mk
 
-PKG_MESON_OPTS_TARGET="-Denable-docs=false"
-
-if [ "${DISPLAYSERVER}" = "x11" ]; then
-  PKG_MESON_OPTS_TARGET+=" -Denable-x11=true \
-                           -Denable-wayland=false"
-elif [ "${DISPLAYSERVER}" = "wl" ]; then
-  PKG_DEPENDS_TARGET+=" wayland wayland-protocols"
-  PKG_MESON_OPTS_TARGET+=" -Denable-x11=true \
-                           -Denable-wayland=true \
-                           -Dxkb-config-root=/usr/share/X11/xkb"
-else
-  PKG_MESON_OPTS_TARGET+=" -Denable-x11=false \
-                           -Denable-wayland=false"
+# keep X11 support under wayland for XWayland clients, which core turns off
+if [ "${DISPLAYSERVER}" = "wl" ]; then
+  PKG_DEPENDS_TARGET+=" libXau libxcb"
+  PKG_MESON_OPTS_TARGET="${PKG_MESON_OPTS_TARGET/-Denable-x11=false/-Denable-x11=true}"
+  PKG_MESON_OPTS_TARGET+=" -Dxkb-config-root=/usr/share/X11/xkb"
 fi
+
+pre_configure_target() {
+  if [ "${DISPLAYSERVER}" = "x11" -o "${DISPLAYSERVER}" = "wl" ]; then
+    TARGET_LDFLAGS="${LDFLAGS} -lXau -lxcb"
+  fi
+}
