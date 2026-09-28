@@ -73,6 +73,8 @@ make_target() {
   export HOME=${PKG_BUILD}/nix
   curl -L https://nixos.org/nix/install | sh -s -- --no-daemon
   . "${HOME}/.nix-profile/etc/profile.d/nix.sh"
+  # pin nixpkgs so channel drift cannot break the generated thunks (nixos-unstable 2026-08-05)
+  export NIX_PATH="nixpkgs=https://github.com/NixOS/nixpkgs/archive/ee67c8504dafc87ba63e862d76558384d10e1e8c.tar.gz"
 
   mkdir -p "${PKG_BUILD}/.${TARGET_NAME}"
   cd "${PKG_BUILD}/.${TARGET_NAME}"
