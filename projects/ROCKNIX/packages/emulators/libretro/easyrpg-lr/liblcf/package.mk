@@ -18,7 +18,7 @@
 ################################################################################
 
 PKG_NAME="liblcf"
-PKG_VERSION="92c4450a1bc1acb58bd02bbb99b57e5036919cdf"
+PKG_VERSION="6854310c3432e553fd4ae672ce861899c80c3bd0"
 PKG_LICENSE="MIT"
 PKG_SITE="https://github.com/EasyRPG/liblcf"
 PKG_URL="${PKG_SITE}.git"

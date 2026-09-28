@@ -2,7 +2,7 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="easyrpg-lr"
-PKG_VERSION="212f3466c9f276ff7cade5a5ead78d3a151343ac"
+PKG_VERSION="e68fff4a13a3dd5d40678ae66ee60f85ccb04153"
 PKG_LICENSE="GPL-3.0-or-later"
 PKG_SITE="https://github.com/easyrpg/player"
 PKG_URL="${PKG_SITE}.git"
