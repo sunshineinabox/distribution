@@ -1,22 +1,25 @@
---- a/src/CMakeLists.txt	2021-06-07 19:12:18.646828485 +0200
-+++ b/src/CMakeLists.txt	2021-06-07 19:13:56.113491528 +0200
-@@ -45,14 +45,12 @@
- include(GNUInstallDirs)
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index abb2d21..2e44f91 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -55,15 +55,13 @@ include(GNUInstallDirs)
+ include(GetGitRevisionDescription)
  include(InstallRequiredSystemLibraries)
  include(FindPkgConfig)
 -include(ExternalProject)
 -include(BuildLibMPEG2)
  
- use_cxx11( )
+ set (CMAKE_CXX_STANDARD 11)
  
  PKG_SEARCH_MODULE(SDL2 REQUIRED sdl2)
  PKG_SEARCH_MODULE(SDL2_TTF REQUIRED SDL2_ttf)
+ PKG_SEARCH_MODULE(SDL2_MIXER REQUIRED SDL2_mixer)
 -build_libmpeg2( )
 +PKG_SEARCH_MODULE(MPEG2 REQUIRED libmpeg2)
  
  message(STATUS "Target: ${CMAKE_SYSTEM_NAME} ${CMAKE_TARGET_ARCHITECTURES}")
  
-@@ -91,7 +89,6 @@
+@@ -117,7 +115,6 @@ add_subdirectory(timer)
  add_subdirectory(video)
  add_subdirectory(vldp)
  
@@ -24,19 +27,19 @@
  add_dependencies( ldp-out vldp )
  add_dependencies( game vldp )
  add_dependencies( sound vldp )
-@@ -129,3 +129,5 @@ set(CPACK_PACKAGE_VERSION_MINOR "${VER_MINOR}")
+@@ -165,3 +162,5 @@ set(CPACK_PACKAGE_VERSION_MINOR "${VER_MINOR}")
  set(CPACK_PACKAGE_VERSION_PATCH "${VER_PATCH}")
  
  include(CPack)
 +install(TARGETS hypseus DESTINATION bin)
 +install(DIRECTORY ../pics ../fonts ../sound DESTINATION /usr/share/daphne)
 diff --git a/src/vldp/vldp.h b/src/vldp/vldp.h
-index a59c723..3c986dc 100644
+index 9e61a8a..68f004d 100644
 --- a/src/vldp/vldp.h
 +++ b/src/vldp/vldp.h
-@@ -34,6 +34,8 @@ extern "C" {
- // Ubuntu Linux complains with plain <SDL.h>
- #include <SDL2/SDL.h> // only used for threading
+@@ -35,6 +35,8 @@ extern "C" {
+ // But CMake does the right thing here 
+ #include <SDL.h> // only used for threading
  
 +#include <mpeg2dec/mpeg2.h>
 +
@@ -44,7 +47,7 @@ index a59c723..3c986dc 100644
      uint8_t *Y;     // Y channel
      uint8_t *U;     // U channel
 diff --git a/src/vldp/vldp_internal.h b/src/vldp/vldp_internal.h
-index cd046fe..67cea2d 100644
+index 88450e9..7976e73 100644
 --- a/src/vldp/vldp_internal.h
 +++ b/src/vldp/vldp_internal.h
 @@ -27,7 +27,6 @@
@@ -54,27 +57,9 @@ index cd046fe..67cea2d 100644
 -#include <mpeg2.h>
  
  // this is which version of the .dat file format we are using
- #define DAT_VERSION 2
- 
---- a/src/manymouse/manymouse.c
-+++ b/src/manymouse/manymouse.c
-@@ -17,7 +17,6 @@
- extern const ManyMouseDriver *ManyMouseDriver_evdev;
- extern const ManyMouseDriver *ManyMouseDriver_hidmanager;
- extern const ManyMouseDriver *ManyMouseDriver_hidutilities;
--extern const ManyMouseDriver *ManyMouseDriver_xinput2;
- 
- /*
-  * These have to be in the favored order...obviously it doesn't matter if the
-@@ -31,7 +30,6 @@
-  */
- static const ManyMouseDriver **mice_drivers[] =
- {
--    &ManyMouseDriver_xinput2,
-     &ManyMouseDriver_evdev,
-     &ManyMouseDriver_windows,
-     &ManyMouseDriver_hidmanager,
-
+ #define DAT_VERSION 3
+diff --git a/src/manymouse/CMakeLists.txt b/src/manymouse/CMakeLists.txt
+index 7c3e66e..c5a8364 100644
 --- a/src/manymouse/CMakeLists.txt
 +++ b/src/manymouse/CMakeLists.txt
 @@ -1,7 +1,8 @@
@@ -87,3 +72,23 @@ index cd046fe..67cea2d 100644
  )
  
  set( LIB_HEADERS
+diff --git a/src/manymouse/manymouse.c b/src/manymouse/manymouse.c
+index c2889c2..992d184 100644
+--- a/src/manymouse/manymouse.c
++++ b/src/manymouse/manymouse.c
+@@ -15,7 +15,6 @@ static const char *manymouse_copyright =
+ 
+ extern const ManyMouseDriver *ManyMouseDriver_windows;
+ extern const ManyMouseDriver *ManyMouseDriver_evdev;
+-extern const ManyMouseDriver *ManyMouseDriver_xinput2;
+ extern const ManyMouseDriver *ManyMouseDriver_hidmanager;
+ extern const ManyMouseDriver *ManyMouseDriver_hidutilities;
+ 
+@@ -33,7 +32,6 @@ extern const ManyMouseDriver *ManyMouseDriver_hidutilities;
+ static const ManyMouseDriver **mice_drivers[] =
+ {
+     &ManyMouseDriver_evdev,
+-    &ManyMouseDriver_xinput2,
+     &ManyMouseDriver_windows,
+     &ManyMouseDriver_hidmanager,
+     &ManyMouseDriver_hidutilities
