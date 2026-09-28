@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="gearboy-lr"
-PKG_VERSION="542f60b7065612cf318986baf5c87ab64075f2aa"
-PKG_SHA256="c4cc7cad99bfa84b4dcf7860eeefc12ef181d4c21798445abbfa71060a01370f"
+PKG_VERSION="31dd84894dfbd8239f08a768805b7b3b12e61cf9"
+PKG_SHA256="f1b8233605ae99d58df67eb0821083f831580419f1a533cbded47631e969b21e"
 PKG_LICENSE="GPL-3.0-or-later"
 PKG_SITE="https://github.com/drhelius/Gearboy"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
