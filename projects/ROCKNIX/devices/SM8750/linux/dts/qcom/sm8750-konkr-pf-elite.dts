@@ -122,7 +122,6 @@
 			linux,code = <KEY_VOLUMEUP>;
 			gpios = <&pm8550_gpios 6 GPIO_ACTIVE_LOW>;
 			debounce-interval = <15>;
-			wakeup-source;
 		};
 		key-rc2 {
 			label = "Right-C2";
