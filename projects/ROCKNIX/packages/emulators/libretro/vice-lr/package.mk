@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="vice-lr"
-PKG_VERSION="91d0d4d884acd44b5240dfcdbd8bdc2f0f757dfd"
-PKG_SHA256="bb2d86206c7890fe036be79ecbf75cb83051e01ecf6b5b140f4950c0e6304356"
+PKG_VERSION="9d7983826ea792f6cce7fdfe6c09488129c6f886"
+PKG_SHA256="c3aaffaef10feab9d22bf8150cbbb4c2992efe6565e9b273f5269b6818e017a6"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/libretro/vice-libretro"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
