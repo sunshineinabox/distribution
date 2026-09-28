@@ -152,8 +152,7 @@ makeinstall_target() {
   # /etc/mtab is needed by udisks etc...
     ln -sf /proc/self/mounts ${INSTALL}/etc/mtab
 
-  # create /etc/hostname
-    ln -sf /proc/sys/kernel/hostname ${INSTALL}/etc/hostname
+  # no /etc/hostname, systemd 261 would treat it as static and refuse the transient device name
 
   # create folder for named tables support
     ln -sf /storage/.config/iproute2 ${INSTALL}/etc/iproute2
