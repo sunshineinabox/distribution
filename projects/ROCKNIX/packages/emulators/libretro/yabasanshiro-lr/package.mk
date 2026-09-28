@@ -2,7 +2,7 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="yabasanshiro-lr"
-PKG_VERSION="39535a6abcad5abf9f71c8b2a7975f005ee12ed6"
+PKG_VERSION="09ed8e5b2e97e7a848ea2514545c34c7b809e399"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/libretro/yabause"
 PKG_URL="${PKG_SITE}.git"
