@@ -2,7 +2,7 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="duckstation-sa"
-PKG_VERSION="0.1-10998"
+PKG_VERSION="0.1-11826"
 PKG_LICENSE="CC-BY-NC-ND-4.0"
 PKG_SITE="https://github.com/stenzek/duckstation"
 PKG_DEPENDS_TARGET="toolchain"
@@ -12,11 +12,11 @@ PKG_TOOLCHAIN="manual"
 case ${TARGET_ARCH} in
   x86_64)
     PKG_URL="${PKG_SITE}/releases/download/v${PKG_VERSION}/DuckStation-x64.AppImage"
-    PKG_SHA256="b204886bb498ede1a290215fc2efb521c0c2f26b964788df697b4fc2cb3f7f7b"
+    PKG_SHA256="c5c8a9de4dfc10e794137dcb8bab9760ca578df2aa7be8c1215171bebbba5965"
     ;;
   aarch64)
     PKG_URL="${PKG_SITE}/releases/download/v${PKG_VERSION}/DuckStation-arm64.AppImage"
-    PKG_SHA256="f92319a0484e67bb62bfab7b0e56dac46165b50e45b51293038d9344a6288440"
+    PKG_SHA256="9e6814087f1549bf86a161ef551e02078f88d62dc5aa52b77fe78bb493671bdf"
     ;;
 esac
 
