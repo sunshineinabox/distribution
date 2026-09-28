@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="prboom-lr"
-PKG_VERSION="861959f30fe0d5d2192ff54c4850c62824299e58"
-PKG_SHA256="4f8a352f60b6b9ba75a50e3197b767e1bb5ce6af56ebdf746e3aad52bf1647ab"
+PKG_VERSION="e5db549b6c85fc500b3a559efe2dc00870521c5d"
+PKG_SHA256="cfedb68cc9a01b4f6a1855ae104478f7a50d3d88a108e427c619eaf5eefa25bf"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/libretro/libretro-prboom"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
