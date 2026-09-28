@@ -1,0 +1,66 @@
+From: virtudude <virtudude@protonmail.com>
+Subject: [PATCH] input: qcom-hv-haptics: stop zero-amplitude effects immediately
+
+A zero-amplitude update while playing dropped gain to 1 and deferred
+the stop by 5 s. The stop applies the configured brake pattern, so
+rumble ended with a distinct tap 5 s after the game stopped it.
+
+Erase the active effect immediately instead, and ignore a following
+playback request when no effect is loaded so it cannot restart stale
+motor state.
+
+In-place gain updates also drop the runtime-PM reference they take.
+
+Ported from Armada: https://github.com/armada-os/armada/blob/410bcf26a67f3e5d38e487d0ec84c5632f2bc3f6/packages/kernel/patches/1004-input-haptics-stop-zero-amplitude-immediately.patch
+---
+--- a/drivers/input/misc/qcom-hv-haptics.c
++++ b/drivers/input/misc/qcom-hv-haptics.c
+@@ -3194,6 +3194,8 @@ static void haptics_runtime_autosuspend(struct haptics_chip *chip)
+ 	pm_runtime_autosuspend(chip->dev);
+ }
+ 
++static int haptics_erase(struct input_dev *dev, int effect_id);
++
+ static int haptics_upload_effect(struct input_dev *dev,
+ 		struct ff_effect *effect, struct ff_effect *old);
+ 
+@@ -3255,16 +3257,8 @@ static int haptics_upload_effect(struct input_dev *dev,
+ 		pr_debug("tried to upload an effect while the chip was busy playing, setting gain...\n");
+ 
+ 		if (gain == 0) {
+-			//The purpose of scheduling a stop_work work is that if the program calls playback afterwards, it will play
+-			// for a very short time using the previous gain
+-			// ( Like Aethersx2, it likes to call playback with zero value EVEN when amplitude is zero)
+-			//We cant stop the playback now, so schedule rumble stop after 5s
+-			//and set the gain to a low value (essentially zero)
+-
+-			dev_dbg(chip->dev, "scheduling stop after 500ms, because gain is zero\n");
+-
+-			dev->ff->set_gain(dev, 1);
+-			schedule_delayed_work(&chip->stop_work, msecs_to_jiffies(5000));
++			haptics_runtime_autosuspend_put(chip);
++			return haptics_erase(dev, effect->id);
+ 		} else {
+ 			dev_dbg(chip->dev, "Setting gain to %hu...\n", gain);
+ 
+@@ -3274,6 +3268,7 @@ static int haptics_upload_effect(struct input_dev *dev,
+ 			schedule_delayed_work(&chip->stop_work, msecs_to_jiffies(effect->replay.length));
+ 		}
+ 
++		haptics_runtime_autosuspend_put(chip);
+ 		return 0;
+ 	}
+ 
+@@ -3378,8 +3373,10 @@ static int haptics_playback(struct input_dev *dev, int effect_id, int val)
+ 
+ 	dev_dbg(chip->dev, "playback val = %d\n", val);
+ 	if (!!val && !chip->chip_is_playing) {
+-		if (!chip->chip_effect_loaded)
+-			dev_warn(chip->dev, "Trying to playback while no effect is loaded!\n");
++		if (!chip->chip_effect_loaded) {
++			dev_dbg(chip->dev, "Trying to playback while no effect is loaded!\n");
++			return 0;
++		}
+ 
+ 		if (chip->config.measure_lra_impedance && chip->visense_enabled)
+ 			chip->pattern_start_time = ktime_get_boottime();
