@@ -6,6 +6,7 @@
 
 /dts-v1/;
 
+#include <dt-bindings/input/gpio-keys.h>
 #include "qcs8550-ayaneo-pocket-common.dtsi"
 
 / {
@@ -14,6 +15,21 @@
 	qcom,msm-id = <0x258 0x20000>, <0x259 0x20000>;
 	compatible = "ayaneo,pocketds", "qcom,qcs8550", "qcom,sm8550";
 	rocknix-u-boot-dt-id = "u-boot-pocket-ds";
+
+	/* BU52053NVx hinge hall sensor, read by the SLPI on stock firmware */
+	gpio-keys-lid {
+		compatible = "gpio-keys";
+
+		hall-lid-sensor {
+			label = "Hall Lid Sensor";
+			gpios = <&tlmm 166 GPIO_ACTIVE_LOW>;
+			linux,input-type = <EV_SW>;
+			linux,code = <SW_LID>;
+			linux,can-disable;
+			wakeup-event-action = <EV_ACT_DEASSERTED>;
+			wakeup-source;
+		};
+	};
 
 	tca6424_vcc: regulator-tca6424-vcc {
 		compatible = "regulator-fixed";
