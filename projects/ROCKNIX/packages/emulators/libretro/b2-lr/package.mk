@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="b2-lr"
-PKG_VERSION="869a541f8659a76e0494520eea3dfb4efbc08d56"
-PKG_SHA256="b55ac2bded733024c65d368c218fe598a15ca4fdda5c7950f290320bc4142a71"
+PKG_VERSION="9793f6a8040c416d147003cada29363b955b54e7"
+PKG_SHA256="c8c2d1061fc76275c2dd4950ca4b692a3c1659ffadb9f1585c741deaabac64a0"
 PKG_LICENSE="GPL-3.0-only"
 PKG_SITE="https://github.com/zoltanvb/b2-libretro"
 PKG_URL="https://github.com/zoltanvb/b2-libretro/archive/${PKG_VERSION}.tar.gz"
