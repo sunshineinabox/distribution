@@ -1,0 +1,17 @@
+From: ROCKNIX <maintainers@rocknix.org>
+Subject: [PATCH] ipc: handle the sticky drag-lock state
+
+libinput added LIBINPUT_CONFIG_DRAG_LOCK_ENABLED_STICKY and sway 1.9 builds with -Werror.
+
+--- a/sway/ipc-json.c
++++ b/sway/ipc-json.c
+@@ -914,6 +914,9 @@
+ 		case LIBINPUT_CONFIG_DRAG_LOCK_DISABLED:
+ 			drag_lock = "disabled";
+ 			break;
++		case LIBINPUT_CONFIG_DRAG_LOCK_ENABLED_STICKY:
++			drag_lock = "enabled_sticky";
++			break;
+ 		}
+ 		json_object_object_add(object, "tap_drag_lock",
+ 				json_object_new_string(drag_lock));

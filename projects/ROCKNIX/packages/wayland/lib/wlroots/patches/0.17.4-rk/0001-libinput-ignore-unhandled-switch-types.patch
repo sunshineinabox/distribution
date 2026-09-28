@@ -1,0 +1,25 @@
+From: ROCKNIX <maintainers@rocknix.org>
+Subject: [PATCH] backend/libinput: ignore unhandled switch types
+
+Return early like wlroots 0.19/0.20 instead of reporting new libinput switch types as lid events.
+
+--- a/backend/libinput/switch.c
++++ b/backend/libinput/switch.c
+@@ -1,6 +1,7 @@
+ #include <assert.h>
+ #include <libinput.h>
+ #include <wlr/interfaces/wlr_switch.h>
++#include <wlr/util/log.h>
+ #include "backend/libinput.h"
+ 
+ const struct wlr_switch_impl libinput_switch_impl = {
+@@ -38,6 +39,9 @@
+ 	case LIBINPUT_SWITCH_TABLET_MODE:
+ 		wlr_event.switch_type = WLR_SWITCH_TYPE_TABLET_MODE;
+ 		break;
++	default:
++		wlr_log(WLR_DEBUG, "Unhandled libinput switch type");
++		return;
+ 	}
+ 	switch (libinput_event_switch_get_switch_state(sevent)) {
+ 	case LIBINPUT_SWITCH_STATE_OFF:
