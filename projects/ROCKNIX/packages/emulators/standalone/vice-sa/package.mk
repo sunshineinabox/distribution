@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="vice-sa"
-PKG_VERSION="3.8"
-PKG_SHA256="1d7dc4d0f2bbcc2a871bb954ff4a5df63048dea9c16f5f1e9bc8260fa41a1004"
+PKG_VERSION="3.10"
+PKG_SHA256="8e5bac18cbcb9f192380ad3ef881f8790f5b75c41d7b3da65d831985d864d6d1"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://sourceforge.net/projects/vice-emu"
 PKG_URL="${PKG_SITE}/files/releases/vice-${PKG_VERSION}.tar.gz"
