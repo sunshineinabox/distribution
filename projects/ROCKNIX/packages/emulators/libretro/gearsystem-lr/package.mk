@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="gearsystem-lr"
-PKG_VERSION="2c725424715dd41a5d6f8e97a4d318316cf9dbad"
-PKG_SHA256="f6c46691e43950f4d80b1a848ea0539c1852da6602d10c2ffc6b94d9848c67dd"
+PKG_VERSION="7848e4e261f4a3110d0960d94feadd4eb844f2ce"
+PKG_SHA256="1ed5189b5c98f9b54f141a66655d3a6fb1e9ab8e5ede4e5ef713d2337bc3adc1"
 PKG_LICENSE="GPL-3.0-or-later"
 PKG_SITE="https://github.com/drhelius/Gearsystem"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
