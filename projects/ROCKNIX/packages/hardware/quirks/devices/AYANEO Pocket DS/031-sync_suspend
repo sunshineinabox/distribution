@@ -1,0 +1,7 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 ROCKNIX (https://github.com/ROCKNIX)
+
+# Async suspend races the lower Goodix touchscreen against the expander
+# and panel rails, and goodix_suspend then aborts the suspend with -EAGAIN.
+echo 0 >/sys/power/pm_async
