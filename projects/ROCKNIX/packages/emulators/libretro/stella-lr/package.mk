@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="stella-lr"
-PKG_VERSION="c1ffb833c8b180433b0cad76bb6b55f8dfbc46ee"
-PKG_SHA256="bd515308f726ac06a6f6e50fa6919ed093a44406a096c6c79b09d4dd1fe872e4"
+PKG_VERSION="36db8267e443a1ddfe4fabc0a3d42ec2b2332cb4"
+PKG_SHA256="6e3b797567ef12ec303a7061b3085eb8cff8bce7e067eda74b67378c5100977c"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/stella-emu/stella"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
