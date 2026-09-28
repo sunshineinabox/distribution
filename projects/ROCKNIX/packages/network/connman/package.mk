@@ -4,9 +4,9 @@
 # Copyright (C) 2023 JELOS (https://github.com/JustEnoughLinuxOS)
 
 PKG_NAME="connman"
-PKG_VERSION="1.43" # 1.43
-PKG_SHA256="22acfe9d5958d7983090232334a692eee66a12f3077e09e4f360276608156738"
-PKG_LICENSE="GPL"
+PKG_VERSION="2.0"
+PKG_SHA256="e0f879af3dfe6c1e4ec1cc31d71af34ee01ed87892be6c596ee42990a17bac53"
+PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="http://www.connman.net"
 PKG_URL="https://git.kernel.org/pub/scm/network/connman/connman.git/snapshot/connman-${PKG_VERSION}.tar.gz"
 PKG_DEPENDS_TARGET="toolchain glib ncurses readline dbus iptables"
@@ -46,6 +46,16 @@ PKG_CONFIGURE_OPTS_TARGET="--srcdir=.. \
                            --with-dbusconfdir=/etc \
                            --with-systemdunitdir=/usr/lib/systemd/system \
                            --disable-silent-rules"
+
+post_configure_target() {
+  # 2.0 links through libtool, which bakes the build sysroot into RUNPATH
+  libtool_remove_rpath libtool
+}
+
+post_unpack() {
+  # 2.0 added AC_CONFIG_AUX_DIR(build-aux), which the git snapshot omits
+  mkdir -p ${PKG_BUILD}/build-aux
+}
 
 if [ "$WIREGUARD_SUPPORT" = "yes" ]; then
   PKG_CONFIGURE_OPTS_TARGET+=" --enable-wireguard=builtin"
