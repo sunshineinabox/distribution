@@ -11,6 +11,8 @@ PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
 PKG_DEPENDS_TARGET="toolchain ncurses SDL2 cabextract libxss libXdmcp libXft gtk2"
 PKG_LONGDESC="Box64 lets you run x86_64 Linux programs (such as games) on non-x86_64 Linux systems, like ARM."
 PKG_TOOLCHAIN="cmake"
+# mold lacks -Ttext-segment, which box64 needs to stay out of guest space
+PKG_BUILD_FLAGS="-mold"
 
 # Dynarce is only enabled with OPT target is set,
 # enable here so its enabled on all platforms

@@ -33,7 +33,9 @@ makeinstall_host() {
 
 makeinstall_target() {
   cd .${TARGET_NAME}
-  unset CFLAGS
+  # the host tools build in the same make run, so keep the target flags away from them
+  local target_ldflags="${LDFLAGS}"
+  unset CFLAGS LDFLAGS
   [ "${ARCH}" = "arm" ] && BIT="-m32"
   make PREFIX="/usr" \
 		CC="${CC} -fPIC" \
@@ -41,10 +43,10 @@ makeinstall_target() {
 		TARGET_AR="${AR} rcus" \
 		TARGET_STRIP=true \
 		TARGET_CFLAGS="${TARGET_CFLAGS}" \
-		TARGET_LDFLAGS="${LDFLAGS}" \
+		TARGET_LDFLAGS="${target_ldflags}" \
 		HOST_CC="${HOST_CC} ${BIT}" \
-		HOST_CFLAGS="${CFLAGS}" \
-		HOST_LDFLAGS="${LDFLAGS}" \
+		HOST_CFLAGS="${HOST_CFLAGS}" \
+		HOST_LDFLAGS="${HOST_LDFLAGS}" \
 		XCFLAGS= \
 		${JITARCH} \
 		amalg

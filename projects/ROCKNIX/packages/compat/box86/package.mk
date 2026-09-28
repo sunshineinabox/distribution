@@ -11,6 +11,9 @@ PKG_DEPENDS_TARGET="toolchain ncurses SDL2 libXdmcp libXft libXcomposite cups li
 PKG_LONGDESC="Box86 lets you run x86 Linux programs (such as games) on non-x86 Linux systems, like ARM."
 PKG_TOOLCHAIN="cmake"
 
+# mold lacks -Ttext-segment and gold cannot link gcc 16 armv9a objects, so use bfd
+PKG_BUILD_FLAGS="-mold -gold"
+
 PKG_CMAKE_OPTS_TARGET="-DCMAKE_BUILD_TYPE=Release \
                        -DARM_DYNAREC=On \
                        -DCMAKE_C_FLAGS=\"-w\""
