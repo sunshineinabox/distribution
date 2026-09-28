@@ -14,6 +14,12 @@ if [ -f "${DEVICE_PWM_FAN}_enable" ] && [ "$(cat "${DEVICE_PWM_FAN}_enable")" !=
   echo "Enabling fan pwm"
 fi
 
+# Speed kept while charging in s2idle, 0 = off (cooling.sleepcharging, 0-255)
+if [ -e "${DEVICE_PWM_FAN}_sleep_charging" ]; then
+  SLEEP_CHARGING=$(get_setting "cooling.sleepcharging")
+  echo "${SLEEP_CHARGING:-0}" >"${DEVICE_PWM_FAN}_sleep_charging"
+fi
+
 log $0 "Setting profile to ${COOLING_PROFILE}"
 
 function set_control() {
