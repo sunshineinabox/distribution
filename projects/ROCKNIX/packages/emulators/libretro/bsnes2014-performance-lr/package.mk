@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="bsnes2014-performance-lr"
-PKG_VERSION="1a6b3caf187605e53fa9970996bcfa49b8c90ce3"
-PKG_SHA256="ee14b173cd509093edd845de092a36becfe22dde93f50583531be87b282e2258"
+PKG_VERSION="3c1394e042ee444c8248e1b9210e14ea55e836e9"
+PKG_SHA256="817a9e33657f0513b17eb0f5fafd3f1cf96df28aef260ebfdc4559dc2e9782f4"
 PKG_LICENSE="GPL-3.0-or-later"
 PKG_SITE="https://github.com/libretro/bsnes2014"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
