@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="retroarch-assets"
-PKG_VERSION="76cc6cf03507429c5a136cb50d83a14e05430fcd"
-PKG_SHA256="f32626950ebd6ab4e709431e8ed7e9124d8c46ddb034fba53b6f760e7f2ea5f6"
+PKG_VERSION="73106363e14e34c08a5854b4cfbc29f184e3b783"
+PKG_SHA256="9a1ea65345b62aac6d20d19e21b3132f66770c65ad976f8badb0178219a135d7"
 PKG_LICENSE="GPL"
 PKG_SITE="https://github.com/libretro/retroarch-assets"
 PKG_URL="https://github.com/libretro/retroarch-assets/archive/${PKG_VERSION}.tar.gz"
