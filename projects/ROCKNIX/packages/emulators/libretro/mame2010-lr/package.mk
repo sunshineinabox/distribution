@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="mame2010-lr"
-PKG_VERSION="484456818393505dd4367e6e4c116c573c04a1ec"
-PKG_SHA256="2c00d52864e1ae4b0eb3335de89f29b1a8ebfe173c9e6910b302e379e92594a8"
+PKG_VERSION="dff8aadd1c3f38215af3955746d6e19abe0ddcea"
+PKG_SHA256="ef62ec2884a18b0af64ad35a96d7622253793d5c93db315d9c1a2f2c021ae72a"
 PKG_LICENSE="MAME"
 PKG_SITE="https://github.com/libretro/mame2010-libretro"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
