@@ -8,9 +8,9 @@ DEBUG=false
 sleep 1 && COOLING_PROFILE=$(get_setting "cooling.profile")
 FAN_PWM="${DEVICE_PWM_FAN}"
 
-# Enable fan if it's turned off
-if [ -f "${DEVICE_PWM_FAN}_enable" ] && [ "$(cat "${DEVICE_PWM_FAN}_enable")" != "1" ]; then
-  echo 1 > "${DEVICE_PWM_FAN}_enable"
+# Mode 3 also cuts the fan supply at duty 0 and across suspend
+if [ -f "${DEVICE_PWM_FAN}_enable" ] && [ "$(cat "${DEVICE_PWM_FAN}_enable")" != "3" ]; then
+  echo 3 > "${DEVICE_PWM_FAN}_enable"
   echo "Enabling fan pwm"
 fi
 
@@ -67,7 +67,7 @@ then
 fi
 
 log $0 "Enabling fan control."
-set_control 1 >/dev/null 2>&1
+set_control 3 >/dev/null 2>&1
 
 while true
 do
