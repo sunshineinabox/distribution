@@ -217,6 +217,8 @@
 &display_panel {
 	compatible = "chipone,icna3520";
 
+	rocknix,dpu-8bpc-dither;
+
 	reset-gpios = <&tlmm 98 GPIO_ACTIVE_LOW>;
 
 	vddio-supply = <&vreg_l12b_1p8>;
