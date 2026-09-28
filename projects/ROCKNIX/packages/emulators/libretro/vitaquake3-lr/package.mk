@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="vitaquake3-lr"
-PKG_VERSION="8ab09d1f54bdd3b69cccf9c648a5d9736701ac63"
-PKG_SHA256="9e95144e89617e84a9e9522a80775dd5dfdd904fe9bcac5451bac3a464dafefc"
+PKG_VERSION="61374f650f42c4f25c215ea1f8db992af162ada6"
+PKG_SHA256="30edb3773c4a87eb3d6d7ebdf256b1e760df228494da0782fc102539798b8409"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/libretro/vitaquake3"
 PKG_URL="https://github.com/libretro/vitaquake3/archive/${PKG_VERSION}.tar.gz"
