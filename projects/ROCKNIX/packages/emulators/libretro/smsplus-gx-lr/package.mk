@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="smsplus-gx-lr"
-PKG_VERSION="8a63f82d3c3bbf7215a31f86a4aaa13fb68a579f"
-PKG_SHA256="0d78af08f70f69af103502690e6908189c9a70a67993d3a9d4bd3114f8259e46"
+PKG_VERSION="3844b46caa926b6494987b97da63092818c4ddef"
+PKG_SHA256="09ca73d206f11e476e714b5297f1efdf4ca52df093103872f9c1cf76b12aa2ed"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/libretro/smsplus-gx"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
