@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="fbalpha2019-lr"
-PKG_VERSION="0581797db6fdffd826086b053ced4b6b29bb6678"
-PKG_SHA256="96812000a349e413d63bc5ef04ab7a330bb0b4194047c048ed6ec549b8274936"
+PKG_VERSION="b25b724ba2046f00f6615a6ffd4eed85a7e367a0"
+PKG_SHA256="aeb9a202d0063b74b344eacf863083f631b6880cfa3b1a86cbf335ec4a9d60d7"
 PKG_LICENSE="Non-commercial"
 PKG_SITE="https://github.com/libretro/fbalpha"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
