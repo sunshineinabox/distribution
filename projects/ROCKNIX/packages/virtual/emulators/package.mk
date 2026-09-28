@@ -74,18 +74,18 @@ case "${DEVICE}" in
   SM8250)
     [ "${ENABLE_32BIT}" == "true" ] && EMUS_32BIT="box86 daedalusx64-sa desmume-lr gpsp-lr pcsx_rearmed-lr"
     PKG_EMUS+=" aethersx2-sa azahar-sa bigpemu-sa cemu-sa dolphin-sa heroic mednafen melonds-sa nanoboyadvance-sa rpcs3-sa supermodel-sa \
-                xemu-sa skyemu-sa steam vita3k-sa armsx2-sa"
+                xemu-sa skyemu-sa steam vita3k-sa armsx2-sa mame-sa"
     LIBRETRO_CORES+=" beetle-psx-lr beetle-saturn-lr bsnes-lr bsnes-hd-lr dolphin-lr kronos-lr uae4arm-lr"
     ;;
   SM8550)
     [ "${ENABLE_32BIT}" == "true" ] && EMUS_32BIT="box86 daedalusx64-sa desmume-lr gpsp-lr pcsx_rearmed-lr"
     PKG_EMUS+=" aethersx2-sa ares-sa azahar-sa bigpemu-sa cemu-sa dolphin-sa drastic-sa gopher64-sa heroic mednafen melonds-sa nanoboyadvance-sa rpcs3-sa supermodel-sa \
-                xemu-sa skyemu-sa steam vita3k-sa armsx2-sa"
+                xemu-sa skyemu-sa steam vita3k-sa armsx2-sa mame-sa"
     LIBRETRO_CORES+=" beetle-psx-lr beetle-saturn-lr bsnes-lr bsnes-hd-lr dolphin-lr kronos-lr uae4arm-lr"
     ;;
   SM8650|SM8750)
     PKG_EMUS+=" aethersx2-sa ares-sa azahar-sa bigpemu-sa cemu-sa dolphin-sa gopher64-sa heroic mednafen melonds-sa nanoboyadvance-sa rpcs3-sa supermodel-sa \
-                xemu-sa skyemu-sa steam vita3k-sa armsx2-sa"
+                xemu-sa skyemu-sa steam vita3k-sa armsx2-sa mame-sa"
     LIBRETRO_CORES+=" beetle-psx-lr beetle-saturn-lr bsnes-lr bsnes-hd-lr dolphin-lr kronos-lr uae4arm-lr"
     ;;
   S922X)
@@ -95,7 +95,7 @@ case "${DEVICE}" in
     ;;
   AMD64)
     PKG_EMUS+=" ares-sa azahar-sa cemu-sa dolphin-sa gopher64-sa mednafen melonds-sa nanoboyadvance-sa \
-                xemu-sa skyemu-sa vita3k-sa armsx2-sa"
+                xemu-sa skyemu-sa vita3k-sa armsx2-sa mame-sa"
     LIBRETRO_CORES+=" beetle-psx-lr beetle-saturn-lr bsnes-lr bsnes-hd-lr dolphin-lr"
 esac
 
@@ -225,6 +225,12 @@ makeinstall_target() {
   case ${DEVICE} in
     SM8550|SM8650|SM8750|AMD64)
       add_emu_core arcade ares ares-sa false
+      ;;
+  esac
+  # Full MAME build, limited to the fastest SoCs to keep build time down; mame-lr covers the rest
+  case ${DEVICE} in
+    SM8250|SM8550|SM8650|SM8750|AMD64)
+      add_emu_core arcade mame mame-sa false
       ;;
   esac
   add_es_system arcade
@@ -781,6 +787,11 @@ makeinstall_target() {
   add_emu_core mame retroarch fbneo false
   add_emu_core mame retroarch fbalpha2012 false
   add_emu_core mame retroarch fbalpha2019 false
+  case ${DEVICE} in
+    SM8250|SM8550|SM8650|SM8750|AMD64)
+      add_emu_core mame mame mame-sa false
+      ;;
+  esac
   add_es_system mame
 
   ### Sega MegaDrive
