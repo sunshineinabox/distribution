@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="vircon32-lr"
-PKG_VERSION="3a1b4ae3fb75c1216fab9cc8715e9a122c461a3a"
-PKG_SHA256="38afe3e43949ab45ee2afae22c76260cac5473016969a421c0eee7d7b2739619"
+PKG_VERSION="dd78c5cea1fcaa382b7492d0d813d6c1534914d7"
+PKG_SHA256="43778b0fa9210bcbe2507a83ce95a3eef4122ff8bfa7e190a9b4741b56f7eefe"
 PKG_LICENSE="BSD-3-Clause"
 PKG_SITE="https://github.com/vircon32/vircon32-libretro"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
