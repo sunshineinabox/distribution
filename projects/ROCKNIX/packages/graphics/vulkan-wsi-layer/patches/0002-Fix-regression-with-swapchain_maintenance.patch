@@ -1,0 +1,105 @@
+From ad47eb201f4cc7c97fa3d4ddb6c6035fe4f7b501 Mon Sep 17 00:00:00 2001
+From: Normunds Rieksts <normunds.rieksts@arm.com>
+Date: Fri, 7 Mar 2025 17:49:18 +0000
+Subject: [PATCH] Fix regression with swapchain_maintenance
+
+Fixes a regression with swapchain_maintenance1 extension after extension
+refactor that did not communicate the changed presentation mode back to
+the swapchain and improperly checked whether swapchain supports
+presentation modes at swapchain creation time when this extension was
+being used.
+
+Change-Id: If06d3c72b44c8f3a06728b4c5c2455346c97ad63
+Signed-off-by: Normunds Rieksts <normunds.rieksts@arm.com>
+---
+ wsi/extensions/swapchain_maintenance.cpp | 11 ++++++-----
+ wsi/extensions/swapchain_maintenance.hpp | 12 +++++-------
+ wsi/swapchain_base.cpp                   |  2 +-
+ 3 files changed, 12 insertions(+), 13 deletions(-)
+
+diff --git a/wsi/extensions/swapchain_maintenance.cpp b/wsi/extensions/swapchain_maintenance.cpp
+index 9c64abd..a8fa507 100644
+--- a/wsi/extensions/swapchain_maintenance.cpp
++++ b/wsi/extensions/swapchain_maintenance.cpp
+@@ -43,17 +43,18 @@ wsi_ext_swapchain_maintenance1::wsi_ext_swapchain_maintenance1(const util::alloc
+ {
+ }
+ 
+-VkResult wsi_ext_swapchain_maintenance1::handle_switching_presentation_mode(VkPresentModeKHR swapchain_present_mode)
++VkResult wsi_ext_swapchain_maintenance1::handle_switching_presentation_mode(VkPresentModeKHR present_mode_to_switch_to,
++                                                                            VkPresentModeKHR &swapchain_present_mode)
+ {
+    assert(m_present_modes.size() > 0);
+    auto it = std::find_if(m_present_modes.begin(), m_present_modes.end(),
+-                          [swapchain_present_mode](VkPresentModeKHR p) { return p == swapchain_present_mode; });
++                          [present_mode_to_switch_to](VkPresentModeKHR p) { return p == present_mode_to_switch_to; });
+    if (it == m_present_modes.end())
+    {
+       WSI_LOG_ERROR("unable to switch presentation mode");
+       return VK_ERROR_SURFACE_LOST_KHR;
+    }
+-   m_present_mode = swapchain_present_mode;
++   swapchain_present_mode = present_mode_to_switch_to;
+    return VK_SUCCESS;
+ }
+ 
+@@ -74,8 +75,8 @@ VkResult wsi_ext_swapchain_maintenance1::handle_swapchain_present_modes_create_i
+       assert(props != nullptr);
+       for (uint32_t i = 0; i < swapchain_present_modes_create_info->presentModeCount; i++)
+       {
+-         auto res =
+-            props->is_compatible_present_modes(m_present_mode, swapchain_present_modes_create_info->pPresentModes[i]);
++         auto res = props->is_compatible_present_modes(swapchain_create_info->presentMode,
++                                                       swapchain_present_modes_create_info->pPresentModes[i]);
+          if (!res)
+          {
+             WSI_LOG_ERROR("present modes incompatible");
+diff --git a/wsi/extensions/swapchain_maintenance.hpp b/wsi/extensions/swapchain_maintenance.hpp
+index fb54dc3..f6027f3 100644
+--- a/wsi/extensions/swapchain_maintenance.hpp
++++ b/wsi/extensions/swapchain_maintenance.hpp
+@@ -63,11 +63,14 @@ public:
+     * then this function handles switching the swapchains(s)' presentation mode
+     * to the one(s) requested in VkSwapchainPresentModeInfoEXT structure.
+     *
+-    * @param swapchain_present_mode presentation mode to switch to.
++    * @param present_mode_to_switch_to presentation mode to switch to.
++    * @param swapchain_present_mode presentation mode to amend to the new presentation mode if
++    *                               deemed possible.
+     *
+     * @return VK_SUCCESS on success or an error code otherwise.
+     */
+-   VkResult handle_switching_presentation_mode(VkPresentModeKHR swapchain_present_mode);
++   VkResult handle_switching_presentation_mode(VkPresentModeKHR present_mode_to_switch_to,
++                                               VkPresentModeKHR &swapchain_present_mode);
+ 
+    /**
+     * @brief If VkSwapchainPresentModesCreateInfoEXT is supplied as part of the pNext chain of VkSwapchainCreateInfoKHR
+@@ -101,11 +104,6 @@ private:
+     * @brief Possible presentation modes this swapchain is allowed to present with VkSwapchainPresentModesCreateInfoEXT
+     */
+    util::vector<VkPresentModeKHR> m_present_modes;
+-
+-   /**
+-    * @brief Present mode currently being used for this swapchain
+-    */
+-   VkPresentModeKHR m_present_mode;
+ };
+ 
+ } /* namespace wsi */
+diff --git a/wsi/swapchain_base.cpp b/wsi/swapchain_base.cpp
+index d744f2c..05491d8 100644
+--- a/wsi/swapchain_base.cpp
++++ b/wsi/swapchain_base.cpp
+@@ -623,7 +623,7 @@ VkResult swapchain_base::queue_present(VkQueue queue, const VkPresentInfoKHR *pr
+       auto *ext = get_swapchain_extension<wsi::wsi_ext_swapchain_maintenance1>(true);
+       if (ext)
+       {
+-         TRY_LOG_CALL(ext->handle_switching_presentation_mode(submit_info.present_mode));
++         TRY_LOG_CALL(ext->handle_switching_presentation_mode(submit_info.present_mode, m_present_mode));
+       }
+    }
+ 
+-- 
+2.55.0
+
