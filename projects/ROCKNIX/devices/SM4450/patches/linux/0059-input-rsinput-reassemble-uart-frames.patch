@@ -1,0 +1,115 @@
+From: virtudude <virtudude@protonmail.com>
+Subject: [PATCH] input: rsinput: reassemble UART frames instead of dropping them
+
+rsinput_rx() treated each serdev callback as exactly one frame and
+dropped the whole batch on a checksum mismatch. serdev may deliver part
+of a frame or several frames per callback, so valid input was lost,
+most visibly as a dead controller and "Checksum mismatch" bursts after
+resume.
+
+Buffer incoming bytes, resync on the frame header, deliver complete
+frames and keep any incomplete tail.
+
+Ported from Armada: https://github.com/armada-os/armada/blob/410bcf26a67f3e5d38e487d0ec84c5632f2bc3f6/packages/kernel/patches/0515-input-rsinput-reassemble-uart-frames-instead-of-dropping-them.patch
+---
+--- a/drivers/input/joystick/rsinput.c
++++ b/drivers/input/joystick/rsinput.c
+@@ -135,6 +135,7 @@ struct rsinput_driver {
+     bool invert_y;
+     bool invert_rx;
+     bool invert_ry;
++    size_t rx_len;
+     uint8_t rx_buf[1024];
+     uint8_t sequence_number;
+     struct delayed_work rx_watchdog;
+@@ -379,39 +380,74 @@ static void rsinput_process_data(struct
+     }
+ }
+ 
++/*
++ * serdev makes no framing guarantee: a callback may contain part of a
++ * frame or multiple frames.
++ */
+ static size_t rsinput_rx(struct serdev_device *serdev, const u8 *data, size_t count) {
+     struct rsinput_driver *drv = serdev_device_get_drvdata(serdev);
+-    uint8_t received_checksum, computed_checksum;
++    size_t consumed = 0, avail;
+ 
+     if (!drv || !data || count == 0) {
+         dev_warn_ratelimited(&serdev->dev, "Invalid RX data\n");
+-        goto error;
++        return count;
+     }
+ 
+     if (count > sizeof(drv->rx_buf)) {
+         dev_warn_ratelimited(&serdev->dev, "RX buffer overflow\n");
+-        goto error;
++        return count;
+     }
+ 
+-    memcpy(drv->rx_buf, data, count);
+-
+-    if (count < MCU_PKT_SIZE_MIN) {
+-        dev_dbg_ratelimited(&serdev->dev, "Frame too short for checksum validation\n");
+-        goto error;
+-    }
++    /*
++     * If the buffered partial frame plus the new bytes would overflow the
++     * buffer, discard the partial frame and resynchronise on the new bytes.
++     */
++    if (drv->rx_len + count > sizeof(drv->rx_buf))
++        drv->rx_len = 0;
++
++    memcpy(drv->rx_buf + drv->rx_len, data, count);
++    drv->rx_len += count;
++    avail = drv->rx_len;
++
++    while (avail >= MCU_PKT_SIZE_MIN) {
++        const uint8_t *frame = drv->rx_buf + consumed;
++        uint16_t payload_length;
++        size_t frame_length;
++
++        if (frame[0] != FRAME_HEAD_1 || frame[1] != FRAME_HEAD_2 ||
++            frame[2] != FRAME_HEAD_3 || frame[3] != FRAME_HEAD_4) {
++            consumed++;
++            avail--;
++            continue;
++        }
+ 
+-    received_checksum = drv->rx_buf[count - 1];
++        payload_length = frame[FRAME_POS_LEN_L] |
++                         (frame[FRAME_POS_LEN_H] << 8);
++        frame_length = MCU_PKT_SIZE_MIN + payload_length;
++
++        if (frame_length > sizeof(drv->rx_buf)) {
++            consumed++;
++            avail--;
++            continue;
++        }
+ 
+-    computed_checksum = compute_checksum(drv->rx_buf, count);
++        if (avail < frame_length)
++            break;
+ 
+-    if (computed_checksum != received_checksum) {
+-        dev_dbg_ratelimited(&serdev->dev, "Checksum mismatch\n");
+-        goto error;
++        if (compute_checksum(frame, frame_length) == frame[frame_length - 1])
++            rsinput_process_data(drv, frame, frame_length);
++        else
++            dev_dbg_ratelimited(&serdev->dev, "Checksum mismatch\n");
++
++        consumed += frame_length;
++        avail -= frame_length;
+     }
+ 
+-    rsinput_process_data(drv, drv->rx_buf, count);
++    if (consumed) {
++        memmove(drv->rx_buf, drv->rx_buf + consumed, avail);
++        drv->rx_len = avail;
++    }
+ 
+-error:
+     return count;
+ }
+ 
