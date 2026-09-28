@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="hatari-lr"
-PKG_VERSION="24e7bd744f24f20b464385f365a3850c269bd140"
-PKG_SHA256="f45c64793a082f1d5a33cb32560276cfd32945912c958066e422f819489817d8"
+PKG_VERSION="ab55c3ed0e620c91e7f059a6d3fbef7acf9bfca8"
+PKG_SHA256="650e6dbbb2ec2a069f83198df77cf793923dbd91ff9653563d20d7be6039c412"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/libretro/hatari"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
