@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="bsnes-mercury-balanced-lr"
-PKG_VERSION="ea22363fb0c1ebe92e7a70cdf55e9bb43f9207be"
-PKG_SHA256="5114fbfae7cc0e1c6479589ae43cd546acff9449cdd6849c7fab0b14c1c53214"
+PKG_VERSION="79d7f9de218b6ffa65a80bbdc5828532bc239232"
+PKG_SHA256="605b74dce8dd61499313b368fe411142b81bf3afe05d6e8197ebb8cba1ff4c9c"
 PKG_LICENSE="GPL-3.0-or-later"
 PKG_SITE="https://github.com/libretro/bsnes-mercury"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
