@@ -1,43 +1,43 @@
 diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
-index 291cc61..bcb2315 100644
+index d8378c3..ea08fdd 100644
 --- a/src/CMakeLists.txt
 +++ b/src/CMakeLists.txt
-@@ -199,6 +199,8 @@ target_link_libraries(CemuBin PRIVATE
+@@ -215,6 +215,8 @@ target_link_libraries(CemuBin PRIVATE
+ 	CemuGui
  	CemuInput
  	CemuUtil
- 	SDL2::SDL2
 +	OpenSSL::SSL
 +	OpenSSL::Crypto
  )
  
  if(UNIX AND NOT APPLE)
 diff --git a/src/Cafe/HW/Latte/Core/LatteIndices.cpp b/src/Cafe/HW/Latte/Core/LatteIndices.cpp
-index 260c6cd..fc47c4a 100644
+index a237644..bd8b8ba 100644
 --- a/src/Cafe/HW/Latte/Core/LatteIndices.cpp
 +++ b/src/Cafe/HW/Latte/Core/LatteIndices.cpp
-@@ -580,7 +580,7 @@ void LatteIndices_fastConvertU16_NEON(const void* indexDataInput, void* indexDat
+@@ -524,7 +524,7 @@ void LatteIndices_fastConvertU16_NEON(const void* indexDataInput, void* indexDat
  		{
  			mTemp = vld1q_u16((uint16*)mRawIndices);
  			mRawIndices++;
 -			mTemp = vrev16q_u8(mTemp);
 +			mTemp = vreinterpretq_u16_u8(vrev16q_u8(vreinterpretq_u8_u16(mTemp)));
- 			mMin = vminq_u16(mMin, mTemp);
  			mMax = vmaxq_u16(mMax, mTemp);
  			vst1q_u16((uint16*)mOutputIndices, mTemp);
-@@ -633,7 +633,7 @@ void LatteIndices_fastConvertU32_NEON(const void* indexDataInput, void* indexDat
+ 			mOutputIndices++;
+@@ -570,7 +570,7 @@ void LatteIndices_fastConvertU32_NEON(const void* indexDataInput, void* indexDat
  		{
  			mTemp = vld1q_u32((uint32*)mRawIndices);
  			mRawIndices++;
 -			mTemp = vrev32q_u8(mTemp);
 +			mTemp = vreinterpretq_u32_u8(vrev32q_u8(vreinterpretq_u8_u32(mTemp)));
- 			mMin = vminq_u32(mMin, mTemp);
  			mMax = vmaxq_u32(mMax, mTemp);
  			vst1q_u32((uint32*)mOutputIndices, mTemp);
+ 			mOutputIndices++;
 diff --git a/src/gui/wxgui/CMakeLists.txt b/src/gui/wxgui/CMakeLists.txt
-index 9a2e880..9f569ac 100644
+index 079a78c..14e384a 100644
 --- a/src/gui/wxgui/CMakeLists.txt
 +++ b/src/gui/wxgui/CMakeLists.txt
-@@ -173,7 +173,7 @@ if(UNIX AND NOT APPLE)
+@@ -186,7 +186,7 @@ if(UNIX AND NOT APPLE)
  endif()
  if (ENABLE_WXWIDGETS)
  	# PUBLIC because wx/app.h is included in CemuApp.h
@@ -47,10 +47,10 @@ index 9a2e880..9f569ac 100644
  
  if(WIN32)
 diff --git a/src/imgui/CMakeLists.txt b/src/imgui/CMakeLists.txt
-index e2d669c..7cba75b 100644
+index b5e9107..bcaa93a 100644
 --- a/src/imgui/CMakeLists.txt
 +++ b/src/imgui/CMakeLists.txt
-@@ -30,6 +30,10 @@ target_sources(imguiImpl PRIVATE
+@@ -40,6 +40,10 @@ target_sources(imguiImpl PRIVATE
  "../../dependencies/imgui/imgui_widgets.cpp"
  )
  

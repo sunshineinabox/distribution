@@ -2,12 +2,12 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="cemu-sa"
-PKG_VERSION="6f6c1299e29fa6e1062ae283a035b4ef787cc397"
+PKG_VERSION="c717fcab1ccc3e0b0b97499a4d9b04a77084e347"
 PKG_LICENSE="MPL-2.0"
 PKG_SITE="https://github.com/cemu-project/Cemu"
 PKG_URL="${PKG_SITE}.git"
 PKG_LONGDESC="KDE Extra CMake Modules"
-PKG_DEPENDS_TARGET="toolchain libzip glslang glm curl rapidjson openssl boost libfmt pugixml libpng gtk3 wxwidgets SDL2 libsodium hidapi spirv-tools"
+PKG_DEPENDS_TARGET="toolchain libzip glslang glm curl rapidjson openssl boost libfmt pugixml libpng gtk3 wxwidgets SDL3 libsodium spirv-tools"
 
 if [ "${DISPLAYSERVER}" = "x11" ]; then
   PKG_DEPENDS_TARGET+=" xwayland"
