@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="supersnes9x-lr"
-PKG_VERSION="691e47b40fb38fa522a5471462344a2f0206b7a8"
-PKG_SHA256="f8646c63337e8d0319afd86e0245b529db174dbec8b5aa7fd5a0e7773130fab5"
+PKG_VERSION="86fcda70d343696031bab962ab0725a28e740e0e"
+PKG_SHA256="ae70fc47119461978a4fac9e28b8ae11227c905fb91bd982398b465dadf53091"
 PKG_LICENSE="Non-commercial"
 PKG_SITE="https://github.com/shanytc/snes9x"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
