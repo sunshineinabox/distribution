@@ -1,0 +1,30 @@
+ConfigVersion = 5
+
+[General]
+BoostEmuThreadPriority = true
+BoostProcessPriority = true
+CheckForUpdates = false
+EnableRewindBuffer = false
+PauseWhenUnfocused = false
+RememberLastLoadedDisc = false
+
+[General.PathOverrides]
+IPLROMImages = '/storage/roms/bios'
+CDBlockROMImages = '/storage/roms/bios'
+SaveStates = '/storage/roms/savestates/saturn/ymir'
+Screenshots = '/storage/roms/screenshots'
+
+[GUI]
+ShowFrameRateOSD = false
+
+[System]
+AutoDetectRegion = true
+EmulateSH2Cache = false
+
+[Video]
+ForceAspectRatio = true
+ForceIntegerScaling = false
+FullScreen = true
+
+[Video.Enhancements]
+Deinterlace = false
