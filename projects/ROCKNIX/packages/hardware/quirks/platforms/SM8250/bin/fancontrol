@@ -8,6 +8,7 @@ DEBUG=false
 sleep 1 && COOLING_PROFILE=$(get_setting "cooling.profile")
 FAN_PWM="${DEVICE_PWM_FAN}"
 FAN_ENABLE="${DEVICE_PWM_FAN}_enable"
+NO_TEMP_SPEED=128
 
 # Profile = trip temps
 TRIPS_AGGRESSIVE="40000 48000 55000 61000 66000 71000"
@@ -156,8 +157,20 @@ log $0 "Enabling fan control."
 LASTINDEX=""
 while true
 do
-  CPU_TEMP=$(awk '{total += $1; count++} END {printf "%d", total/count}' ${DEVICE_TEMP_SENSOR})
+  CPU_TEMP=$(awk '$1 > -40000 {total += $1; count++} END {if (count) printf "%d", total/count}' ${DEVICE_TEMP_SENSOR})
   $DEBUG && log $0 "CPU TEMP: ${CPU_TEMP}" 2>/dev/null
+  if [ -z "${CPU_TEMP}" ]
+  then
+    if [ ! "${LASTSPEED}" = "${NO_TEMP_SPEED}" ]
+    then
+      log $0 "No valid CPU temperature, setting PWM FAN to ${NO_TEMP_SPEED}"
+      echo ${NO_TEMP_SPEED} >${FAN_PWM}
+      LASTSPEED=${NO_TEMP_SPEED}
+    fi
+    LASTINDEX=""
+    sleep 3
+    continue
+  fi
   INDEX=0
   for TEMP in "${TEMPS[@]}"
   do
