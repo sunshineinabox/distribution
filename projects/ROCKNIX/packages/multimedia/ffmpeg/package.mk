@@ -27,10 +27,14 @@ get_graphicdrivers
 
 PKG_FFMPEG_HWACCEL="--enable-hwaccels"
 
-# RK3588 has no mainline V4L2 decoders, every other RK runs mainline V4L2 stateless
+# RK3588 decodes through the vendor MPP service, the other RKs through mainline V4L2
 case ${DEVICE} in
   RK3588*)
     V4L2_SUPPORT=no
+    PKG_DEPENDS_TARGET+=" rkmpp libdrm"
+    PKG_NEED_UNPACK+=" $(get_pkg_directory libdrm)"
+    # rkmpp needs libdrm enabled explicitly
+    PKG_FFMPEG_RKMPP="--enable-rkmpp --enable-libdrm"
   ;;
   RK3326*|RK3399*)
     PKG_PATCH_DIRS+=" v4l2-request vf-deinterlace-v4l2m2m"
@@ -172,6 +176,7 @@ configure_target() {
               --enable-swscale-alpha \
               --disable-small \
               ${PKG_FFMPEG_V4L2} \
+              ${PKG_FFMPEG_RKMPP} \
               ${PKG_FFMPEG_VAAPI} \
               ${PKG_FFMPEG_VDPAU} \
               --enable-runtime-cpudetect \
