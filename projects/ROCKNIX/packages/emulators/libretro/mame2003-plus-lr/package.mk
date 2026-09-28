@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="mame2003-plus-lr"
-PKG_VERSION="a045126dad33d70ce555e7e7fe22a69d3a1efcc7"
-PKG_SHA256="0b1661fb1c7d19746bd0e5d76fa10beccc5338328928e79ec620a4253a3216c4"
+PKG_VERSION="31419303cbcbe2104a069f98948324963a226a4d"
+PKG_SHA256="8155bc2a95be518a9e1fe76f781b2e358d75c414310267aaafaed650a1cda7f3"
 PKG_LICENSE="MAME"
 PKG_SITE="https://github.com/libretro/mame2003-plus-libretro"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
