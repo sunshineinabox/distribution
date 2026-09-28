@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="retroarch-joypads"
-PKG_VERSION="38cf938bba0adbde375972053068f10d955a9d14"
-PKG_SHA256="5288b1526325b7dcfa0aba9b52d8e0f3a0b36dec08137513fee3d3927e317020"
+PKG_VERSION="3579625fa24e61c86c48d03de9d5f9fd7b323a16"
+PKG_SHA256="a60b36762f563aadb3f836a2c091d30fa6d257f6243d0434ebf4467dbf5bbc2f"
 PKG_LICENSE="GPL"
 PKG_SITE="https://github.com/libretro/retroarch-joypad-autoconfig"
 PKG_URL="https://github.com/libretro/retroarch-joypad-autoconfig/archive/${PKG_VERSION}.tar.gz"
