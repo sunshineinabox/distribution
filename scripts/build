@@ -299,6 +299,12 @@ record_timestamp BUILD_CONFIGURE
 pkg_call_exists_opt pre_configure && pkg_call
 pkg_call_exists_opt pre_configure_${TARGET} && pkg_call
 
+# a configure killed partway leaves a meson dir that can never configure again, so start over
+if [ -d "meson-private" ] && { [ ! -f "meson-private/build.dat" ] || [ ! -f "build.ninja" ]; }; then
+  build_msg "CLR_WARNING" "MESON" "discarding a partially configured build directory"
+  rm -rf meson-private meson-info meson-logs build.ninja .ninja_deps .ninja_log
+fi
+
 if pkg_call_exists configure_${TARGET}; then
   pkg_call
 else
@@ -467,6 +473,11 @@ done
 # symlink lib32 -> lib to make 32-bit apps agnostic of dependencies' libdir
 if [ ! -d "${SYSROOT_PREFIX}${BUILD_OPTS_TARGET_LIBDIR}" ]; then
   ln -s lib "${SYSROOT_PREFIX}${BUILD_OPTS_TARGET_LIBDIR}"
+fi
+
+# create the lib32 link in the shared sysroot too, not only via whichever package merges first
+if [ -n "${BUILD_OPTS_TARGET_LIBDIR}" -a ! -e "${PKG_ORIG_SYSROOT_PREFIX}${BUILD_OPTS_TARGET_LIBDIR}" ]; then
+  ln -sfn lib "${PKG_ORIG_SYSROOT_PREFIX}${BUILD_OPTS_TARGET_LIBDIR}" 2>/dev/null || true
 fi
 
 record_timestamp BUILD_MAKEINSTALL
