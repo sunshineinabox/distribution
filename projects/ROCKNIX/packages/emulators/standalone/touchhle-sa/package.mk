@@ -3,7 +3,7 @@
 
 PKG_NAME="touchhle-sa"
 PKG_LICENSE="MPL-2.0"
-PKG_VERSION="3c5850585ba55615b17a58c58331b6d6f52d4a9d"
+PKG_VERSION="570af14c80ddc75f2c2f2fcd81df639bfdd17297"
 PKG_SITE="https://github.com/touchHLE/touchHLE"
 PKG_URL="${PKG_SITE}.git"
 PKG_DEPENDS_TARGET="toolchain cargo:host cargo rust SDL2 sndio libsamplerate"
