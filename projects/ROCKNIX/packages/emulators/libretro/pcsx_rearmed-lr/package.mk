@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="pcsx_rearmed-lr"
-PKG_VERSION="da2cb8ecd17fd0932ab6d94774c0522beebce6e3"
-PKG_SHA256="ff191a349aa88b7156f2c40ae32b7144884eec921542f07508d88715105d175e"
+PKG_VERSION="ff81ed17a15241d2f3730cdd7585b38e172532ca"
+PKG_SHA256="23e0006435e66503e1b862daaf8a47cb6bee120f4ca82482c08ec129668a35c5"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/libretro/pcsx_rearmed"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
