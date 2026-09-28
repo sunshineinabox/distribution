@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="mupen64plus-sa-simplecore"
-PKG_VERSION="5340dafcc0f5e8284057ab931dd5c66222d3d49e"
-PKG_SHA256="04a3b14a82182b8f54f88b52585e27b91d37335f87393537332ce94c28037f6b"
+PKG_VERSION="b20b27ebf9e5b099a978e86dba609111dc98c837"
+PKG_SHA256="69db653c5347dfeee55809952a01f5e16484a3f6d974252f1e9e0a44e775b32e"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/simple64/mupen64plus-core"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"

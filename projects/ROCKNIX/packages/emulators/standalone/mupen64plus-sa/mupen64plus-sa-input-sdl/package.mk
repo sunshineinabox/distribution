@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="mupen64plus-sa-input-sdl"
-PKG_VERSION="3698a2b12b1dc536801649de2705b4a79ffb8a08"
-PKG_SHA256="9a2f2b2a0dbb7bdd32f26495d9614d19a0fc215ffaefeb11bef167d7e7b006c9"
+PKG_VERSION="842c39e89749aa3a8d02202b2afddd20b29cdfdb"
+PKG_SHA256="7d69413251ed2e772098a73ba1815c9310243f3ccc7e99ecbda33dc4d7b5d283"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/mupen64plus/mupen64plus-input-sdl"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"

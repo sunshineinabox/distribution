@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="mupen64plus-sa-video-rice"
-PKG_VERSION="470865c6c64bdb44645faa88eae59cd87ce561b6"
-PKG_SHA256="baa1fc034cc27d6c178d014794f8171817b9c96db5317feaede0d0d22e898676"
+PKG_VERSION="f0a7b9f391b0e9bc14962b114f7da1ba553060be"
+PKG_SHA256="33a8c37683812077b2f8c04e5bf8593d2f7c44f7c7f316ef1fc3f2eb59f8579b"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/mupen64plus/mupen64plus-video-rice"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"

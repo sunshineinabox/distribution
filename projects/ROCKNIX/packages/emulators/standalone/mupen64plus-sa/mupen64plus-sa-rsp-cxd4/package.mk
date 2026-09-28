@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="mupen64plus-sa-rsp-cxd4"
-PKG_VERSION="f6ff3719cb68d3e1c1497fc87a661921671db719"
-PKG_SHA256="01ecf1e584a132cfc69e367583db3a9de9b44fdf7fe10cd3e1d10c0cd88e171e"
+PKG_VERSION="00906a92641c540a64e4e7505012157315314810"
+PKG_SHA256="f347ed748bd755f57736327966931e09bbe8aa38c6a35f8fcf89d275cfc6cefd"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/mupen64plus/mupen64plus-rsp-cxd4"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"

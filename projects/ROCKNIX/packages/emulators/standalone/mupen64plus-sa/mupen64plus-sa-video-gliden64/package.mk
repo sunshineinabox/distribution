@@ -2,7 +2,7 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="mupen64plus-sa-video-gliden64"
-PKG_VERSION="85bdd452d7090f78a0f76d02121fa59ad079b7f6"
+PKG_VERSION="41c7ba273a6c9afb43c0574cf3cf5d139182d070"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/gonetz/GLideN64"
 PKG_URL="${PKG_SITE}.git"
@@ -31,7 +31,6 @@ esac
 
 post_unpack() {
   sed -i 's/\-O[23]/-Ofast/' ${PKG_BUILD}/src/CMakeLists.txt
-  sed -i '/#ifndef TXHIRESLOADER_H/a #include <cstdint>' ${PKG_BUILD}/src/GLideNHQ/TxHiResLoader.h
 }
 
 configure_target() {

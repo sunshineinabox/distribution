@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="mupen64plus-sa-video-glide64mk2"
-PKG_VERSION="992b5942078fe77987e8c40bcd396f44be19be2b"
-PKG_SHA256="192ae40ac12c1dc38c336748e68679c4393ebc02caa1f0530ba21f1a7024ccdf"
+PKG_VERSION="b07cb0bc8f29d6ee43efdf0a4d5a1b878ba98393"
+PKG_SHA256="c33cfccfc5b1d2e2365c97f212e0f1b0684a551ce1bf974373e6401f80df9457"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/mupen64plus/mupen64plus-video-glide64mk2"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"

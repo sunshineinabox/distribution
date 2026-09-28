@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="mupen64plus-sa-ui-console"
-PKG_VERSION="1340c4bdfc9ec53d3fccda5e085930dd79eb08b3"
-PKG_SHA256="8ea9c5d7234d19080ba1f2792cbe61181270a530ce1f12bf146468f00cb7dbe4"
+PKG_VERSION="c8ac4862a019d7885b24927d9b4db5dd3e42a528"
+PKG_SHA256="02cde33256773080d71270f2c14542bed6cf38221efecda972ed53a15fe8ced2"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/mupen64plus/mupen64plus-ui-console"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"

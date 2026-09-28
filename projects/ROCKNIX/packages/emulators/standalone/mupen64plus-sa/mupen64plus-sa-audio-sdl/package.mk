@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="mupen64plus-sa-audio-sdl"
-PKG_VERSION="cec70e42b4535ce5bd1be24e7d816c54b3e75673"
-PKG_SHA256="38361dcfd10e99ecc2ce99e4e33b1e27b686686d22723cee9ae727d1881438f8"
+PKG_VERSION="2faed1c7e62c5f292948e7cd2398c184970cf794"
+PKG_SHA256="36d3106fa0f3af34af27f09f5be5b1c1465deb17021fffe1e7e048576cc575b8"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/mupen64plus/mupen64plus-audio-sdl"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
