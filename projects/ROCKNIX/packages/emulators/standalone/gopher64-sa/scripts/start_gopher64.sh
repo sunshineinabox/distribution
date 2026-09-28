@@ -16,8 +16,8 @@ if [ ! -d "${CONF_DIR}" ]; then
   cp -r "${SOURCE_DIR}" "/storage/.config/"
 fi
 
-#Check if config.json exists in .config/gopher64
-if [ ! -f "${CONF_DIR}/${GOPHER64_JSON}" ]; then
+#Check if config.json exists in .config/gopher64, replace the pre-1.1.36 input format
+if [ ! -f "${CONF_DIR}/${GOPHER64_JSON}" ] || grep -q '"controller_buttons"' "${CONF_DIR}/${GOPHER64_JSON}"; then
   cp -r "${SOURCE_DIR}/${GOPHER64_JSON}" "${CONF_DIR}"
 fi
 
