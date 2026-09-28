@@ -1,7 +1,7 @@
-diff -rupN retroarch.orig/frontend/drivers/platform_unix.c retroarch/frontend/drivers/platform_unix.c
---- retroarch.orig/frontend/drivers/platform_unix.c	2022-02-05 19:38:43.852018492 -0500
-+++ retroarch/frontend/drivers/platform_unix.c	2022-02-05 20:10:30.735583922 -0500
-@@ -2048,12 +2048,6 @@ static void frontend_unix_deinit(void *d
+diff --git a/frontend/drivers/platform_unix.c b/frontend/drivers/platform_unix.c
+--- a/frontend/drivers/platform_unix.c
++++ b/frontend/drivers/platform_unix.c
+@@ -3388,12 +3388,6 @@ static void frontend_unix_deinit(void *data)
     android_app_destroy(android_app);
  #endif
  
@@ -14,7 +14,7 @@ diff -rupN retroarch.orig/frontend/drivers/platform_unix.c retroarch/frontend/dr
     frontend_unix_set_gamemode(false);
  }
  
-@@ -2885,11 +2879,7 @@ frontend_ctx_driver_t frontend_ctx_unix
+@@ -4405,11 +4399,7 @@ frontend_ctx_driver_t frontend_ctx_unix = {
  #else
     NULL,                               /* get_lakka_version */
  #endif
@@ -24,6 +24,6 @@ diff -rupN retroarch.orig/frontend/drivers/platform_unix.c retroarch/frontend/dr
 -   NULL,                         /* set_screen_brightness */
 -#endif
 +   NULL,                         /* set_screen_brightness? No. */
-    frontend_unix_watch_path_for_changes,
-    frontend_unix_check_for_path_changes,
     frontend_unix_set_sustained_performance_mode,
+    frontend_unix_get_cpu_model_name,
+    frontend_unix_get_user_language,

@@ -1,12 +1,11 @@
-diff -rupN retroarch.orig/menu/menu_setting.c retroarch/menu/menu_setting.c
---- retroarch.orig/menu/menu_setting.c	2022-03-05 15:34:24.206615672 -0500
-+++ retroarch/menu/menu_setting.c	2022-03-05 20:09:51.435336191 -0500
-@@ -9321,7 +9321,7 @@ static bool setting_append_list(
-          CONFIG_ACTION(
-                list, list_info,
-                MENU_ENUM_LABEL_QUIT_RETROARCH,
--               MENU_ENUM_LABEL_VALUE_RESTART_RETROARCH,
-+               MENU_ENUM_LABEL_VALUE_QUIT_RETROARCH,
-                &group_info,
-                &subgroup_info,
-                parent_group);
+diff --git a/settings/settings_def_quit_restart.h b/settings/settings_def_quit_restart.h
+--- a/settings/settings_def_quit_restart.h
++++ b/settings/settings_def_quit_restart.h
+@@ -6,6 +6,6 @@
+ 
+ /* Row referencing QUIT_RETROARCH; strings owned by another def file. */
+ #if !defined(SETTINGS_DEF_STRINGS_PASS) && !defined(SETTINGS_DEF_CONFIG_PASS) && !defined(SETTINGS_DEF_ENUM_PASS)
+-SDESC_ACTION_ROW_LV(QUIT_RETROARCH, RESTART_RETROARCH,
++SDESC_ACTION_ROW_LV(QUIT_RETROARCH, QUIT_RETROARCH,
+                      SD_FLAG_NONE, NULL, NULL, CMD_EVENT_QUIT)
+ #endif
