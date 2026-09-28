@@ -2,12 +2,12 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="emuscv-lr"
-PKG_VERSION="dfce10df090ce3f5eb23bdbee289702ec1478246"
-PKG_SHA256="f94c59fc91baa4dc8e96233bf0ec710fe1aaf79baa35c0b5af7fe42f73754fec"
+PKG_VERSION="17407117018919545428b753277dabd83630052f"
+PKG_SHA256="99fe167d0e278aef4a5f4c4ace7940f949ae03b2251b0d49946a699a39d2e454"
 PKG_LICENSE="GPL-3.0-or-later"
 PKG_SITE="https://gitlab.com/MaaaX-EmuSCV/libretro-emuscv"
 PKG_URL="${PKG_SITE}/-/archive/${PKG_VERSION}/libretro-emuscv-${PKG_VERSION}.tar.gz"
-PKG_DEPENDS_TARGET="toolchain bin2c:host SDL2"
+PKG_DEPENDS_TARGET="toolchain bin2c:host"
 PKG_DEPENDS_UNPACK="glibc"
 PKG_LONGDESC="An EPOCH/YENO Super Cassette Vision (1984) home video game emulator for Libretro"
 PKG_TOOLCHAIN="make"
