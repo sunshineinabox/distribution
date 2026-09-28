@@ -3,7 +3,7 @@ new file mode 100644
 index 0000000..e4054ba
 --- /dev/null
 +++ b/ucm2/Qualcomm/sm8650/APS2/SM8650-APS2.conf
-@@ -0,0 +1,13 @@
+@@ -0,0 +1,32 @@
 +Syntax 4
 +
 +SectionUseCase."HiFi" {
@@ -17,12 +17,31 @@ index 0000000..e4054ba
 +Include.wsam-init.File "/codecs/qcom-lpass/wsa-macro/init.conf"
 +Include.rxm-init.File "/codecs/qcom-lpass/rx-macro/init.conf"
 +Include.wsa-init.File "/codecs/wsa884x/two-speakers/init.conf"
++
++If.pockets2 {
++	Condition {
++		Type String
++		String1 "${sys:firmware/devicetree/base/model}"
++		String2 "AYANEO Pocket S2"
++	}
++	True {
++		# The SoundWire compander controls PA gain; adjust the input digitally.
++		LibraryConfig.remap.Config {
++			ctl.default.map {
++				"name='Speakers Digital Playback Volume'" {
++					"name='WSA_RX0 Digital Volume'".vindex.0 0
++					"name='WSA_RX1 Digital Volume'".vindex.1 0
++				}
++			}
++		}
++	}
++}
 diff --git a/ucm2/Qualcomm/sm8650/APS2/HiFi.conf b/ucm2/Qualcomm/sm8650/APS2/HiFi.conf
 new file mode 100644
 index 0000000..dc5211e
 --- /dev/null
 +++ b/ucm2/Qualcomm/sm8650/APS2/HiFi.conf
-@@ -0,0 +1,112 @@
+@@ -0,0 +1,137 @@
 +SectionVerb {
 +	EnableSequence [
 +		cset "name='DISPLAY_PORT_RX_0 Audio Mixer MultiMedia1' 0"
@@ -43,6 +62,32 @@ index 0000000..dc5211e
 +SectionDevice."Speaker" {
 +	Comment "Speaker playback"
 +
++	If.pockets2 {
++		Condition {
++			Type String
++			String1 "${sys:firmware/devicetree/base/model}"
++			String2 "AYANEO Pocket S2"
++		}
++		True {
++			# Match the companders enabled in the WSA8845 speaker sequence.
++			EnableSequence [
++				cset "name='WSA_COMP1 Switch' 1"
++				cset "name='WSA_COMP2 Switch' 1"
++				# Keep a valid unity PA gain when using digital volume control.
++				cset "name='SpkrLeft PA Volume' 17"
++				cset "name='SpkrRight PA Volume' 17"
++			]
++			Value {
++				PlaybackMixerElem "Speakers Digital"
++			}
++		}
++		False {
++			Value {
++				PlaybackMixerElem "Speakers"
++			}
++		}
++	}
++
 +	Include.wcdspk1e.File "/codecs/qcom-lpass/wsa-macro/SpeakerEnableSeq.conf"
 +	Include.wcdspk1d.File "/codecs/qcom-lpass/wsa-macro/SpeakerDisableSeq.conf"
 +	Include.wsaspkd.File "/codecs/wsa884x/two-speakers/SpeakerSeq.conf"
@@ -52,7 +97,6 @@ index 0000000..dc5211e
 +		PlaybackPriority 100
 +		PlaybackPCM "hw:${CardId},1"
 +		PlaybackMixer "default:${CardId}"
-+		PlaybackMixerElem "Speakers"
 +	}
 +}
 +
