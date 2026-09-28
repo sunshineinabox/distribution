@@ -51,6 +51,12 @@ source_devices:
       product_id: "028e"
       handler: event*
     capability_map_id: ayaneo_mcu_xbox
+  # Pocket EVO only: AYA SPACE, =, LC and RC on the aya-keys gpio-keys node
+  - group: gamepad
+    evdev:
+      name: aya-keys
+      handler: event*
+    capability_map_id: ayaneo_pocketevo_gpio
 
 # Optional configuration for the composite device
 options:

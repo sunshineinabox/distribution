@@ -14,9 +14,59 @@
 	qcom,msm-id = <0x258 0x20000>, <0x259 0x20000>;
 	compatible = "ayaneo,pocketevo", "qcom,qcs8550", "qcom,sm8550";
 	rocknix-u-boot-dt-id = "u-boot-pocket-evo";
+
+	/*
+	 * AYA SPACE, =, LC and RC are on SoC GPIOs, not the MCU. Separate
+	 * node so InputPlumber can grab it without taking volume up. F13-F16
+	 * so nothing types text when the node is not grabbed.
+	 */
+	aya-keys {
+		compatible = "gpio-keys";
+		label = "aya-keys";
+
+		pinctrl-0 = <&aya_keys_default>;
+		pinctrl-names = "default";
+
+		key-aya-space {
+			label = "AYA Space";
+			debounce-interval = <15>;
+			gpios = <&tlmm 85 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_F13>;
+		};
+
+		key-menu {
+			label = "Menu";
+			debounce-interval = <15>;
+			gpios = <&tlmm 169 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_F14>;
+		};
+
+		/* Silkscreen LC; the vendor device tree calls this rc2_key */
+		key-lc {
+			label = "LC";
+			debounce-interval = <15>;
+			gpios = <&tlmm 170 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_F15>;
+		};
+
+		/* Silkscreen RC; the vendor device tree calls this lc_key */
+		key-rc {
+			label = "RC";
+			debounce-interval = <15>;
+			gpios = <&tlmm 91 GPIO_ACTIVE_LOW>;
+			linux,code = <KEY_F16>;
+		};
+	};
 };
 
 &tlmm {
+	aya_keys_default: aya-keys-default-state {
+		pins = "gpio85", "gpio91", "gpio169", "gpio170";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
 	panel_pwr_active: panel-pwr-active-state {
 		pins = "gpio152", "gpio153";
 		function = "gpio";

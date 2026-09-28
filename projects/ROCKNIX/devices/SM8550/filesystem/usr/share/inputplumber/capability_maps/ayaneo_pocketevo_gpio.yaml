@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/capability_map_v2.json
+version: 2
+kind: CapabilityMap
+name: AYANEO Pocket EVO GPIO Buttons
+id: ayaneo_pocketevo_gpio
+
+mapping:
+  - name: AYA SPACE
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: KEY_F13
+          value_type: button
+    target_event:
+      gamepad:
+        button: QuickAccess
+
+  - name: Menu (=)
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: KEY_F14
+          value_type: button
+    target_event:
+      gamepad:
+        button: LeftPaddle2
+
+  - name: LC
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: KEY_F15
+          value_type: button
+    target_event:
+      gamepad:
+        button: LeftPaddle1
+
+  - name: RC
+    source_events:
+      - evdev:
+          event_type: KEY
+          event_code: KEY_F16
+          value_type: button
+    target_event:
+      gamepad:
+        button: RightPaddle1
+
+filtered_events: []
