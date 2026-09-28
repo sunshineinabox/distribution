@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="supermodel-sa"
-PKG_VERSION="b13fdd5029a246e8f90a1d70e2ed000779fee4f1"
-PKG_SHA256="ff4a925fdf739da08b4e8dd19e09d0a81dda0801fe2d276acf7905073bfa8b96"
+PKG_VERSION="6ae0cf2f237586c4a3cc791514ec1b0f3cd4c56c"
+PKG_SHA256="f29f12962da1f3ffaf8a08f00d089495e2a7fbc546416ca019250bdfcba051ca"
 PKG_LICENSE="GPL-3.0-or-later"
 PKG_SITE="https://github.com/DirtBagXon/model3emu-code-sinden"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
