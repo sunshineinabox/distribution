@@ -66,6 +66,10 @@ makeinstall_target() {
 
       mkdir -p ${INSTALL}/etc/binfmt.d
       cp ${PKG_BUILD}/.${TARGET_NAME}/system/box86.conf ${INSTALL}/etc/binfmt.d
+
+      mkdir -p ${INSTALL}/usr/config
+        cp ${PKG_BUILD}/system/box86.box86rc ${INSTALL}/usr/config/box86.box86rc
+
       ;;
     aarch64)
       mkdir -p ${INSTALL}/usr/share/box86/lib
@@ -79,11 +83,9 @@ makeinstall_target() {
 
       mkdir -p ${INSTALL}/etc/binfmt.d
         cp -vP ${BUILD_ROOT}/build.${DISTRO}-${DEVICE}.arm/install_pkg/${PKG_NAME}-*/etc/binfmt.d/box86.conf ${INSTALL}/etc/binfmt.d
+
       ;;
   esac
-
-  mkdir -p ${INSTALL}/usr/config
-    cp ${BUILD_ROOT}/build.${DISTRO}-${DEVICE}.arm/build/${PKG_NAME}-*/system/box86.box86rc ${INSTALL}/usr/config/box86.box86rc
 
   mkdir -p ${INSTALL}/etc
     ln -sf /storage/.config/box86.box86rc ${INSTALL}/etc/box86.box86rc
