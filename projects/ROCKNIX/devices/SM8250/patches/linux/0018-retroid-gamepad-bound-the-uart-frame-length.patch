@@ -1,0 +1,47 @@
+From: Ga1dz1 <5482gfbt@gmail.com>
+Subject: [PATCH] Input: retroid: bound the UART frame length
+
+The frame length comes straight from the wire. A misaligned or corrupt
+chunk (e.g. UART garbage on resume) with a large length overflows the
+on-stack frame buffer and reads past the received data. Drop frames
+whose length exceeds the buffer or the received byte count.
+
+Ported from Armada: https://github.com/Ga1dz1/armada-packages/commit/219b7ef75173e6de108935c4d524089011a36dda
+---
+diff --git a/drivers/input/joystick/retroid.c b/drivers/input/joystick/retroid.c
+index 375e7d421..08aff1aea 100644
+--- a/drivers/input/joystick/retroid.c
++++ b/drivers/input/joystick/retroid.c
+@@ -301,13 +301,22 @@ static size_t gamepad_mcu_uart_rx_bytes(struct serdev_device *serdev,
+ {
+ 	struct device *dev = &serdev->dev;
+ 	struct gamepad_data recv_data_buffer;
++	u16 data_len;
+ 	u8 checksum;
+ 
+-	if (!data || count < 7) {
++	if (!data || count < 8) {
+ 		dev_warn_ratelimited(dev, "invalid packet");
+ 		return count;
+ 	}
+ 
++	/* header(4) frame(1) command(1) length(2) payload checksum(1) */
++	data_len = data[6] | (data[7] << 8);
++	if (data_len > MAX_DATA_LEN || count < (size_t)data_len + 9) {
++		dev_warn_ratelimited(dev, "malformed packet (len %u, count %zu)",
++				     data_len, count);
++		return count;
++	}
++
+ 	checksum = gamepad_data_checksum(data, count);
+ 	if (checksum != *(data + count - 1)) {
+ 		//dev_warn_ratelimited(dev, "packet checksum failed");
+@@ -317,7 +326,7 @@ static size_t gamepad_mcu_uart_rx_bytes(struct serdev_device *serdev,
+ 	memcpy(recv_data_buffer.header, data, 4);
+ 	recv_data_buffer.frame_number = *(data + 4);
+ 	recv_data_buffer.command = *(data + 5);
+-	recv_data_buffer.data_len = *(data + 6) | (*(data + 7) << 8);
++	recv_data_buffer.data_len = data_len;
+ 
+ 	if (recv_data_buffer.data_len) {
+ 		memset(&recv_data_buffer.data[0], 0,
