@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="desmume-lr"
-PKG_VERSION="8f6b32cb9a5e310bd38520e7087ce7fa14765f15"
-PKG_SHA256="8e6291e9c25b3c677644b101d8919ee3b64532be035a456cc4be2f2e7919484e"
+PKG_VERSION="95b4d798731caa809125b6c3c11d17cc332ff6ef"
+PKG_SHA256="ecb657859366d5498e151cb804f19f9b0f2646fb8a4d7df21cc51cca0feca0f5"
 PKG_LICENSE="GPL-2.0-or-later"
 PKG_SITE="https://github.com/libretro/desmume"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
