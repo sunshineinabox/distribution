@@ -60,7 +60,7 @@ then
 0 1 2 1 0 64
 0 1 3 0
 0 1 4 0
-0 1 ${DEVICE_BTN_SELECT} 5 Virtual keyboard
+0 1 ${DEVICE_BTN_SELECT} 5 virtual-keyboard
 0 1 ${DEVICE_BTN_START} 4
 EOF
 
