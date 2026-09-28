@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="fmsx-lr"
-PKG_VERSION="f013e213458e06d9df718e4bc4b09d46f88aa899"
-PKG_SHA256="ddd0b48489da2498feff8d3613c0471367d23d9fe331d1367ecf199360ee87f8"
+PKG_VERSION="4de11755ce4f196ac1c8a7bb20bb4eccbc87a7d4"
+PKG_SHA256="00d67d2bd41254d48fac9e9ae8c3b399aead46b3bcecca2e9f3cdf7f03feef44"
 PKG_LICENSE="Non-commercial"
 PKG_SITE="https://github.com/libretro/fmsx-libretro"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
