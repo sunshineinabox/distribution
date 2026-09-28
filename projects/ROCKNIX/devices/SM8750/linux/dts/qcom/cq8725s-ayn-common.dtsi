@@ -1229,11 +1229,24 @@
 	status = "okay";
 };
 
+&sdc2_default {
+	cmd-pins {
+		drive-strength = <16>;
+	};
+
+	data-pins {
+		drive-strength = <16>;
+	};
+};
+
 &sdhc_2 {
 	cd-gpios = <&tlmm 55 GPIO_ACTIVE_LOW>;
+	cd-debounce-delay-ms = <3000>;
 
 	vmmc-supply = <&vreg_l9b_2p9>;
 	vqmmc-supply = <&vreg_l8b_1p8>;
+
+	post-power-on-delay-ms = <200>;
 
 	no-sdio;
 	no-mmc;
