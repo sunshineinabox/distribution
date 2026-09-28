@@ -2,8 +2,8 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="geargrafx-lr"
-PKG_VERSION="ca629d729a3691f1aa0d5cd7b0fa687e7d56c394"
-PKG_SHA256="55406bddfc8476543feb7a557fea5d19c585313f4f84f37e0cd3a0899e4bed71"
+PKG_VERSION="fc5f29f53c46ed59713ebd0d3ca3b4bac141d986"
+PKG_SHA256="bc16b5bd68752f2c82bebd8a39d54d3d7524ad1508143fb00e455c71f0096d84"
 PKG_LICENSE="GPL-3.0-or-later"
 PKG_SITE="https://github.com/drhelius/Geargrafx"
 PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
