@@ -1,0 +1,32 @@
+Build the Linux timed-wait deadline with clock_gettime like the Android branch, instead of time() and ctime().
+
+--- a/yabause/src/scsp.c
++++ b/yabause/src/scsp.c
+@@ -151,6 +151,7 @@
+ #include "sys/resource.h"
+ #include <errno.h>
+ #include <pthread.h>
++#include <time.h>
+ pthread_cond_t  sync_cnd = PTHREAD_COND_INITIALIZER;
+ pthread_mutex_t sync_mutex = PTHREAD_MUTEX_INITIALIZER;
+ #endif
+@@ -5672,14 +5673,14 @@
+         }
+         pthread_mutex_unlock(&sync_mutex);
+ #elif defined(ARCH_IS_LINUX)    
+-        time(&tm);    
+-        long n = tm.tv_nsec;
++        clock_gettime(CLOCK_REALTIME, &tm);
+         tm.tv_nsec += sleeptime;
+-        if( n > tm.tv_nsec){
+-          tm.tv_sec += 1;
++        if (tm.tv_nsec >= 1000000000L) {
++          tm.tv_sec += tm.tv_nsec / 1000000000L;
++          tm.tv_nsec %= 1000000000L;
+         }
+         pthread_mutex_lock(&sync_mutex);
+-        int rtn = pthread_cond_timedwait(&sync_cnd,&sync_mutex,ctime(&tm));
++        int rtn = pthread_cond_timedwait(&sync_cnd,&sync_mutex,&tm);
+         if(rtn == 0){
+           for (i = 0; i < samplecnt; i += step) {
+             MM68KExec(step);
