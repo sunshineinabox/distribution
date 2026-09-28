@@ -1,0 +1,38 @@
+From: virtudude <virtudude@protonmail.com>
+Subject: [PATCH] ASoC: qcom: sc8280xp: add KONKR Pocket FIT WSA2 sound card
+
+The KONKR Pocket FIT shares the Pocket S2 WSA2-only speaker wiring.
+Give it a board-specific compatible backed by the same channel mapping.
+
+Ported from Armada: https://github.com/armada-os/armada/blob/410bcf26a67f3e5d38e487d0ec84c5632f2bc3f6/packages/kernel/patches/0010-ASoC-qcom-add-KONKR-Pocket-FIT-WSA2-card.patch
+---
+--- a/Documentation/devicetree/bindings/sound/qcom,sm8250.yaml
++++ b/Documentation/devicetree/bindings/sound/qcom,sm8250.yaml
+@@ -31,6 +31,7 @@
+           - const: qcom,sm8450-sndcard
+       - enum:
+           - ayaneo,pocket-s2-sndcard
++          - konkr,pocket-fit-sndcard
+           - fairphone,fp4-sndcard
+           - fairphone,fp5-sndcard
+           - qcom,apq8096-sndcard
+--- a/sound/soc/qcom/sc8280xp.c
++++ b/sound/soc/qcom/sc8280xp.c
+@@ -206,7 +206,8 @@
+ 	if (ret)
+ 		return ret;
+ 
+-	if (of_device_is_compatible(dev->of_node, "ayaneo,pocket-s2-sndcard"))
++	if (of_device_is_compatible(dev->of_node, "ayaneo,pocket-s2-sndcard") ||
++	    of_device_is_compatible(dev->of_node, "konkr,pocket-fit-sndcard"))
+ 		data->snd_prepare = ayaneo_ps2_snd_prepare;
+ 
+ 	card->driver_name = of_device_get_match_data(dev);
+@@ -216,6 +217,7 @@
+ 
+ static const struct of_device_id snd_sc8280xp_dt_match[] = {
+ 	{.compatible = "ayaneo,pocket-s2-sndcard", "ayaneo-ps2"},
++	{.compatible = "konkr,pocket-fit-sndcard", "sm8650"},
+ 	{.compatible = "qcom,eliza-sndcard", "eliza"},
+ 	{.compatible = "qcom,kaanapali-sndcard", "kaanapali"},
+ 	{.compatible = "qcom,qcm6490-idp-sndcard", "qcm6490"},

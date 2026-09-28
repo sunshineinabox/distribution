@@ -13,6 +13,10 @@
 	compatible = "ayaneo,pocket-s2", "qcom,sm8650";
 };
 
+&{/sound} {
+	compatible = "ayaneo,pocket-s2-sndcard";
+};
+
 &i2c4 {
 	touchscreen@5d {
 		reg = <0x5d>;

@@ -13,6 +13,10 @@
 	compatible = "konkr,pocket-fit", "qcom,sm8650";
 };
 
+&{/sound} {
+	compatible = "konkr,pocket-fit-sndcard";
+};
+
 &mdss_dsi0 {
 	status = "okay";
 	vdda-supply = <&vreg_l3i_1p2>;

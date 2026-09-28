@@ -18,7 +18,10 @@ makeinstall_target() {
     "SM6115") cp -a SM6115/* ${INSTALL}/$(get_full_firmware_dir) ;;
     "SM8250") cp -a SM8250/* ${INSTALL}/$(get_full_firmware_dir) ;;
     "SM8550") cp -a SM8550/* ${INSTALL}/$(get_full_firmware_dir) ;;
-    "SM8650") cp -a SM8650/* ${INSTALL}/$(get_full_firmware_dir) ;;
+    "SM8650") cp -a SM8650/* ${INSTALL}/$(get_full_firmware_dir)
+              # the Pocket S2 sound card driver name is ayaneo-ps2
+              mkdir -p ${INSTALL}/$(get_full_firmware_dir)/qcom/ayaneo-ps2
+              ln -sf ../sm8650/SM8650-APS2-tplg.bin ${INSTALL}/$(get_full_firmware_dir)/qcom/ayaneo-ps2/ ;;
     "SM8750") cp -a SM8750/* ${INSTALL}/$(get_full_firmware_dir) ;;
     "RK3566") cp -a RK3566/* ${INSTALL}/$(get_full_firmware_dir) ;;
   esac

@@ -1,0 +1,118 @@
+From 968d38918ae85e67069099ea456e3e13fea70081 Mon Sep 17 00:00:00 2001
+From: Neil Armstrong <neil.armstrong@linaro.org>
+Date: Tue, 28 Jul 2026 10:46:45 +0200
+Subject: ASoC: qcom: sc8280xp: add Ayaneo Pocket S2 card with special WSA
+ channel mapping
+
+The WSA Speakers are connected on the WSA2 interface, but the
+WSA and WSA2 links are handled as a single dai and DSP interface, so
+we need to specify the channel mapping of the Ayaneo Pocket S2 for the
+WSA dai in order to have functional playback and avoid DSP errors.
+
+Let's add a special entry for the Ayaneo Pocket S2 adding a prepare
+callback in order to set the proper channel mapping.
+
+Backported to the 7.2 machine driver, which has no per-compatible private
+data: the prepare hook is stored in sc8280xp_snd_data at probe.
+
+Reviewed-by: Srinivas Kandagatla <srinivas.kandagatla@oss.qualcomm.com>
+Signed-off-by: Neil Armstrong <neil.armstrong@linaro.org>
+Link: https://patch.msgid.link/20260728-topic-sm8650-ayaneo-pocket-s2-wsa2-fix-v3-3-b29f44720178@linaro.org
+Signed-off-by: Mark Brown <broonie@kernel.org>
+
+Ported from Armada: https://github.com/armada-os/armada/blob/410bcf26a67f3e5d38e487d0ec84c5632f2bc3f6/packages/kernel/patches/0009-ASoC-qcom-sc8280xp-add-Ayaneo-Pocket-S2-card.patch
+---
+--- a/sound/soc/qcom/sc8280xp.c
++++ b/sound/soc/qcom/sc8280xp.c
+@@ -12,6 +12,7 @@
+ #include <sound/jack.h>
+ #include <linux/input-event-codes.h>
+ #include "qdsp6/q6afe.h"
++#include "qdsp6/q6dsp-common.h"
+ #include "common.h"
+ #include "sdw.h"
+ 
+@@ -21,6 +22,7 @@
+ 	struct snd_soc_jack jack;
+ 	struct snd_soc_jack dp_jack[8];
+ 	bool jack_setup;
++	int (*snd_prepare)(struct snd_pcm_substream *substream);
+ };
+ 
+ static int sc8280xp_snd_init(struct snd_soc_pcm_runtime *rtd)
+@@ -96,12 +98,58 @@
+ 	return 0;
+ }
+ 
++/*
++ * WSA and WSA2 are handled as a single interface with the
++ * following channels mask:
++ *  __________________________________________________
++ *  | Bits  |     3    |     2    |   1     |     0   |
++ *  ---------------------------------------------------
++ *  | Line  | WSA2 Ch2 | WSA2 Ch1 | WSA Ch2 | WSA Ch1 |
++ *  ---------------------------------------------------
++ *
++ * The Ayaneo Pocket S2 speakers are connected only to
++ * the WSA2 interface and the WSA interface is not enabled.
++ *
++ * Set the channel mapping on the WSA2 channels only.
++ */
++static const unsigned int ayaneo_ps2_channels_mapping[] = {
++	0,			/* WSA Ch1 */
++	0,			/* WSA Ch2 */
++	PCM_CHANNEL_FL,		/* WSA2 Ch1 */
++	PCM_CHANNEL_FR		/* WSA2 Ch2 */
++};
++
++static int ayaneo_ps2_snd_prepare(struct snd_pcm_substream *substream)
++{
++	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
++	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
++	unsigned int channels = substream->runtime->channels;
++
++	if (cpu_dai->id != WSA_CODEC_DMA_RX_0)
++		return 0;
++
++	if (channels != 2)
++		return -EINVAL;
++
++	return snd_soc_dai_set_channel_map(cpu_dai, 0, NULL,
++					   ARRAY_SIZE(ayaneo_ps2_channels_mapping),
++					   ayaneo_ps2_channels_mapping);
++}
++
+ static int sc8280xp_snd_prepare(struct snd_pcm_substream *substream)
+ {
+ 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+ 	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+ 	struct sc8280xp_snd_data *data = snd_soc_card_get_drvdata(rtd->card);
+ 
++	if (data->snd_prepare) {
++		int ret;
++
++		ret = data->snd_prepare(substream);
++		if (ret)
++			return ret;
++	}
++
+ 	return qcom_snd_sdw_prepare(substream, &data->stream_prepared[cpu_dai->id]);
+ }
+ 
+@@ -158,12 +206,16 @@
+ 	if (ret)
+ 		return ret;
+ 
++	if (of_device_is_compatible(dev->of_node, "ayaneo,pocket-s2-sndcard"))
++		data->snd_prepare = ayaneo_ps2_snd_prepare;
++
+ 	card->driver_name = of_device_get_match_data(dev);
+ 	sc8280xp_add_be_ops(card);
+ 	return devm_snd_soc_register_card(dev, card);
+ }
+ 
+ static const struct of_device_id snd_sc8280xp_dt_match[] = {
++	{.compatible = "ayaneo,pocket-s2-sndcard", "ayaneo-ps2"},
+ 	{.compatible = "qcom,eliza-sndcard", "eliza"},
+ 	{.compatible = "qcom,kaanapali-sndcard", "kaanapali"},
+ 	{.compatible = "qcom,qcm6490-idp-sndcard", "qcm6490"},
