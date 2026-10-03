@@ -73,7 +73,7 @@
     FIRMWARE="extra-firmware"
 
   # Additional packages to install
-    ADDITIONAL_PACKAGES="libmali"
+    ADDITIONAL_PACKAGES="libmali rocknix-kwin-session"
     ADDITIONAL_PACKAGES_32BIT="libmali"
 
   # Debug tty path

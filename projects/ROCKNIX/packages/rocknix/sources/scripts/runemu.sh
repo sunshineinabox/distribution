@@ -442,11 +442,13 @@ if [ "${DEVICE_SCANOUT_SCALING}" = "true" ] && [ "${PLATFORM}" != "steam" ] && [
   scanout_claim
   trap scanout_reset EXIT
 
-  eval "$(swaymsg -t get_outputs | jq -r '
-    (.[] | select(.focused == true) |
-    "OUTPUT_W=\(.current_mode.width) OUTPUT_H=\(.current_mode.height) OUTPUT_TRANSFORM=\(.transform) OUTPUT_NAME=\(.name)"),
-    (first(.[] | select(.focused != true and .active == true)) | "OUTPUT2_NAME=\(.name)")
-  ')"
+  while read -r name w h transform focused; do
+    if [ "${focused}" = "true" ] && [ -z "${OUTPUT_NAME}" ]; then
+      OUTPUT_W=${w} OUTPUT_H=${h} OUTPUT_TRANSFORM=${transform} OUTPUT_NAME=${name}
+    elif [ -n "${name}" ] && [ -z "${OUTPUT2_NAME}" ]; then
+      OUTPUT2_NAME=${name}
+    fi
+  done <<< "$(output_list)"
 
   # Lines the plane has to rotate, the game's once it is scaled
   case ${OUTPUT_TRANSFORM} in
@@ -598,10 +600,9 @@ DISPLAY_MODE=$(get_setting "display_mode" "${PLATFORM}" "${ROMNAME##*/}")
 if [ ! -z "${DISPLAY_MODE}" ] && [ "${DISPLAY_MODE}" != "default" ]
 then
   DISPLAY_MODE=$(get_setting "system.display_mode")
-  DISPLAY_OUTPUT=$(/usr/bin/wlr-randr | awk 'NR==1{print $1;}')
   if [ -z "${DISPLAY_MODE}" ]; then
     # if we have no system mode use the displays preferred mode
-    /usr/bin/wlr-randr --output ${DISPLAY_OUTPUT} --preferred
+    output_set_mode preferred
   else
     # If we have user specifed system mode set that
     set_refresh_rate "${DISPLAY_MODE}"

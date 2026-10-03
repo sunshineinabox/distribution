@@ -5,6 +5,10 @@
 # SM6115-specific minimal system-sleep handler.
 
 dpms() {
+  if pidof kwin_wayland >/dev/null 2>&1; then
+    XDG_RUNTIME_DIR=/var/run/0-runtime-dir WAYLAND_DISPLAY=wayland-1 kscreen-doctor --dpms "${1}" >/dev/null 2>&1
+    return
+  fi
   if [ -z "${SWAYSOCK}" ]; then
     SWAYSOCK="$(find /run/user/*/sway-ipc.*.sock 2>/dev/null | head -1)"
     [ -n "${SWAYSOCK}" ] && export SWAYSOCK

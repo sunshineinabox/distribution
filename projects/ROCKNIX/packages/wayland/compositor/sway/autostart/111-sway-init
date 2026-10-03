@@ -16,7 +16,7 @@ fi
 
 # Copy base config, we are overwriting any user config
 UIMODE=$(get_setting desktop.enabled)
-if [ "${UIMODE}" = "1" ]; then
+if [ "${UIMODE}" = "1" ] && [ "$(session_compositor)" != "kwin" ]; then
     cp $SWAY_CONFIG_DESKTOP $SWAY_HOME/config
     # Shouldn't need to mask, but disable wouldn't do it.
     systemctl mask essway.service
