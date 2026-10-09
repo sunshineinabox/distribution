@@ -392,3 +392,37 @@ mkimage_all() {
     "${func_name}"
   done
 }
+
+### Rebuild dependents
+
+# Clean the packages of the last build that were built against a dependency
+# which has since changed what it installs, or that link a library the image no
+# longer has, so the next build rebuilds them. Prints the cleaned packages.
+clean_dependents() {
+  local compiler machine pkg
+
+  [ "${CLEAN_DEPENDENTS}" = "no" ] && return 0
+  [ -f "${THREAD_CONTROL}/plan.json" ] || return 0
+
+  # no toolchain yet, nothing to compare against
+  compiler="$("${TARGET_PREFIX}gcc" -dumpfullversion 2>/dev/null)" || return 0
+  [ -n "${compiler}" ] || return 0
+
+  case "${TARGET_ARCH}" in
+    aarch64) machine=183 ;;
+    arm) machine=40 ;;
+    x86_64) machine=62 ;;
+    *) machine=0 ;;
+  esac
+
+  for pkg in $("${DISTRO_DIR}/${DISTRO}/config/clean_dependents.py" \
+    --plan "${THREAD_CONTROL}/plan.json" \
+    --build "${BUILD}" \
+    --stamps "${STAMPS}" \
+    --readelf "$(command -v "${TARGET_PREFIX}readelf" || echo readelf)" \
+    --machine "${machine}" \
+    --compiler "${compiler}"); do
+    "${SCRIPTS}/clean" "${pkg}" >&2
+    echo "${pkg}"
+  done
+}
