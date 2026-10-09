@@ -1,0 +1,86 @@
+From d71d71a21162f670218077bd97acc7fe195d0223 Mon Sep 17 00:00:00 2001
+From: Normunds Rieksts <normunds.rieksts@arm.com>
+Date: Wed, 12 Aug 2026 16:15:19 +0100
+Subject: [PATCH] Recheck timed semaphore count after wakeups
+
+A condition-variable wake does not guarantee that the semaphore count
+is non-zero. Recheck the counter after every successful wake so
+spurious or consumed wakeups cannot underflow it.
+
+Compute the finite absolute deadline once before waiting so retries
+preserve the original timeout.
+
+Change-Id: Ifaebbe22ba5a0396cc9df184df17893d29f43158
+
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/vulkan-wsi-layer/-/commit/d71d71a21162f670218077bd97acc7fe195d0223]
+---
+ util/timed_semaphore.cpp | 44 ++++++++++++++++++++++------------------
+ 1 file changed, 24 insertions(+), 20 deletions(-)
+
+diff --git a/util/timed_semaphore.cpp b/util/timed_semaphore.cpp
+index 48da4a6..0d5ab97 100644
+--- a/util/timed_semaphore.cpp
++++ b/util/timed_semaphore.cpp
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2017, 2019, 2021-2022 Arm Limited.
++ * Copyright (c) 2017, 2019, 2021-2022, 2026 Arm Limited.
+  *
+  * SPDX-License-Identifier: MIT
+  *
+@@ -97,7 +97,29 @@ VkResult timed_semaphore::wait(uint64_t timeout)
+    res = pthread_mutex_lock(&m_mutex);
+    assert(res == 0); /* only fails with programming error (EINVAL) */
+ 
+-   if (m_count == 0)
++   struct timespec end = {};
++   if (m_count == 0 && timeout != 0 && timeout != UINT64_MAX)
++   {
++      struct timespec diff = { /* narrowing casts */
++                               static_cast<time_t>(timeout / (1000 * 1000 * 1000)),
++                               static_cast<long>(timeout % (1000 * 1000 * 1000))
++      };
++
++      struct timespec now = {};
++      res = clock_gettime(CLOCK_MONOTONIC, &now);
++      assert(res == 0); /* only fails with programming error (EINVAL, EFAULT, EPERM) */
++
++      /* add diff to now, handling overflow */
++      end = { now.tv_sec + diff.tv_sec, now.tv_nsec + diff.tv_nsec };
++
++      if (end.tv_nsec >= 1000 * 1000 * 1000)
++      {
++         end.tv_nsec -= 1000 * 1000 * 1000;
++         end.tv_sec++;
++      }
++   }
++
++   while (m_count == 0 && retval == VK_SUCCESS)
+    {
+       switch (timeout)
+       {
+@@ -110,24 +132,6 @@ VkResult timed_semaphore::wait(uint64_t timeout)
+ 
+          break;
+       default:
+-         struct timespec diff = { /* narrowing casts */
+-                                  static_cast<time_t>(timeout / (1000 * 1000 * 1000)),
+-                                  static_cast<long>(timeout % (1000 * 1000 * 1000))
+-         };
+-
+-         struct timespec now = {};
+-         res = clock_gettime(CLOCK_MONOTONIC, &now);
+-         assert(res == 0); /* only fails with programming error (EINVAL, EFAULT, EPERM) */
+-
+-         /* add diff to now, handling overflow */
+-         struct timespec end = { now.tv_sec + diff.tv_sec, now.tv_nsec + diff.tv_nsec };
+-
+-         if (end.tv_nsec >= 1000 * 1000 * 1000)
+-         {
+-            end.tv_nsec -= 1000 * 1000 * 1000;
+-            end.tv_sec++;
+-         }
+-
+          res = pthread_cond_timedwait(&m_cond, &m_mutex, &end);
+          /* only fails with programming error, other than timeout */
+          assert(res == 0 || res == ETIMEDOUT);

@@ -2,11 +2,11 @@
 # Copyright (C) 2024-present ROCKNIX (https://github.com/ROCKNIX)
 
 PKG_NAME="vulkan-wsi-layer"
-PKG_VERSION="8f077c5c862e5259841d524de8280b8c2429990a"
-PKG_SHA256="cd45a40c476e59557385c334f4266b62b05c73e50d725d4a464b7dc44ca61de8"
+PKG_VERSION="e2e9eaac5494f26d16928471e190057fb6eb18fb"
+PKG_SHA256="c05d6a24c3d5f77418eae92bca275f248083b453d75169cd03f9857431edf236"
 PKG_LICENSE="MIT"
-PKG_SITE="https://gitlab.freedesktop.org/mesa/vulkan-wsi-layer"
-PKG_URL="${PKG_SITE}/-/archive/${PKG_VERSION}.tar.gz"
+PKG_SITE="https://github.com/ginkage/vulkan-wsi-layer"
+PKG_URL="${PKG_SITE}/archive/${PKG_VERSION}.tar.gz"
 PKG_DEPENDS_TARGET="toolchain libdrm wayland-protocols ${VULKAN}"
 PKG_DEPENDS_UNPACK="linux"
 PKG_LONGDESC="Implements Vulkan extensions for Window System Integration inside a Vulkan layer."
@@ -29,6 +29,8 @@ fi
 PKG_CMAKE_OPTS_TARGET+=" -DVULKAN_CXX_INCLUDE=${SYSROOT_PREFIX}/usr \
         -DBUILD_WSI_HEADLESS=OFF \
         -DBUILD_WSI_WAYLAND=ON \
+        -DBUILD_WSI_DISPLAY=OFF \
+        -DBUILD_WSI_X11=OFF \
         -DSELECT_EXTERNAL_ALLOCATOR=dma_buf_heaps \
         -DWSIALLOC_MEMORY_HEAP_NAME=${HEAP_NAME} \
         -DENABLE_WAYLAND_FIFO_PRESENTATION_THREAD=ON \

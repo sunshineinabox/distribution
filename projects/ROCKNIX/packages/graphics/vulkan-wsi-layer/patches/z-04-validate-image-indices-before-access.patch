@@ -1,0 +1,159 @@
+From 0b23b7f2cb1eff20fdbf929f933246976cd0c51e Mon Sep 17 00:00:00 2001
+From: Iason Paraskevopoulos <iason.paraskevopoulos@arm.com>
+Date: Mon, 14 Sep 2026 14:39:36 +0000
+Subject: [PATCH] Validate image indices before access
+
+Reject invalid application-provided swapchain image indices before accessing image storage. Validate complete index lists before changing swapchain state.
+
+Change-Id: Id00f5ea62fa5248cd69b558be6b64d434af91fca
+
+Upstream-Status: Backport [https://gitlab.freedesktop.org/mesa/vulkan-wsi-layer/-/commit/0b23b7f2cb1eff20fdbf929f933246976cd0c51e]
+---
+ layer/swapchain_api.cpp             |  2 +-
+ layer/swapchain_maintenance_api.cpp |  6 ++----
+ wsi/swapchain_base.cpp              | 25 ++++++++++++++++++++--
+ wsi/swapchain_base.hpp              | 32 +++++++++++++++++++++++++----
+ 4 files changed, 54 insertions(+), 11 deletions(-)
+
+diff --git a/layer/swapchain_api.cpp b/layer/swapchain_api.cpp
+index be4d7a7..6d27281 100644
+--- a/layer/swapchain_api.cpp
++++ b/layer/swapchain_api.cpp
+@@ -156,7 +156,7 @@ static VkResult submit_wait_request(VkQueue queue, const VkPresentInfoKHR &prese
+    for (uint32_t i = 0; i < present_info.swapchainCount; ++i)
+    {
+       auto swapchain = reinterpret_cast<wsi::swapchain_base *>(present_info.pSwapchains[i]);
+-      swapchain_semaphores[i] = swapchain->get_image_present_semaphore(present_info.pImageIndices[i]);
++      TRY(swapchain->get_image_present_semaphore(present_info.pImageIndices[i], swapchain_semaphores[i]));
+    }
+ 
+    wsi::queue_submit_semaphores semaphores = { present_info.pWaitSemaphores, present_info.waitSemaphoreCount,
+diff --git a/layer/swapchain_maintenance_api.cpp b/layer/swapchain_maintenance_api.cpp
+index af868dd..067d909 100644
+--- a/layer/swapchain_maintenance_api.cpp
++++ b/layer/swapchain_maintenance_api.cpp
+@@ -1,5 +1,5 @@
+ /*
+- * Copyright (c) 2024-2025 Arm Limited.
++ * Copyright (c) 2024-2026 Arm Limited.
+  *
+  * SPDX-License-Identifier: MIT
+  *
+@@ -52,7 +52,5 @@ wsi_layer_vkReleaseSwapchainImagesEXT(VkDevice device, const VkReleaseSwapchainI
+    }
+ 
+    auto *sc = reinterpret_cast<wsi::swapchain_base *>(pReleaseInfo->swapchain);
+-   sc->release_images(pReleaseInfo->imageIndexCount, pReleaseInfo->pImageIndices);
+-
+-   return VK_SUCCESS;
++   return sc->release_images(pReleaseInfo->imageIndexCount, pReleaseInfo->pImageIndices);
+ }
+diff --git a/wsi/swapchain_base.cpp b/wsi/swapchain_base.cpp
+index 31587e4..8e0ca69 100644
+--- a/wsi/swapchain_base.cpp
++++ b/wsi/swapchain_base.cpp
+@@ -595,6 +595,12 @@ VkResult swapchain_base::queue_present(VkQueue queue, const VkPresentInfoKHR *pr
+       return get_error_state();
+    }
+ 
++   if (!is_valid_image_index(submit_info.pending_present.image_index))
++   {
++      WSI_LOG_ERROR("Swapchain image index %u is out of bounds.", submit_info.pending_present.image_index);
++      return VK_ERROR_VALIDATION_FAILED;
++   }
++
+    if (m_present_mode == VK_PRESENT_MODE_SHARED_CONTINUOUS_REFRESH_KHR)
+    {
+       const util::unique_lock<util::recursive_mutex> image_status_lock(m_image_status_mutex);
+@@ -823,20 +829,35 @@ VkResult swapchain_base::wait_and_get_free_buffer(uint64_t timeout)
+    return retval;
+ }
+ 
+-void swapchain_base::release_images(uint32_t image_count, const uint32_t *indices)
++VkResult swapchain_base::release_images(uint32_t image_count, const uint32_t *indices)
+ {
++   for (uint32_t i = 0; i < image_count; i++)
++   {
++      if (!is_valid_image_index(indices[i]))
++      {
++         WSI_LOG_ERROR("Swapchain image index %u is out of bounds.", indices[i]);
++         return VK_ERROR_VALIDATION_FAILED;
++      }
++   }
++
+    for (uint32_t i = 0; i < image_count; i++)
+    {
+       uint32_t index = indices[i];
+-      assert(index < m_swapchain_images.size());
+       /* Applications can only pass acquired images that the device doesn't own */
+       assert(m_swapchain_images[index].get_status() == swapchain_image::ACQUIRED);
+       unpresent_image(index, true);
+    }
++
++   return VK_SUCCESS;
+ }
+ 
+ VkResult swapchain_base::is_bind_allowed(uint32_t image_index) const
+ {
++   if (!is_valid_image_index(image_index))
++   {
++      return VK_ERROR_VALIDATION_FAILED;
++   }
++
+    return m_swapchain_images[image_index].get_status() != swapchain_image::UNALLOCATED ? VK_SUCCESS :
+                                                                                          VK_ERROR_OUT_OF_HOST_MEMORY;
+ }
+diff --git a/wsi/swapchain_base.hpp b/wsi/swapchain_base.hpp
+index deff585..297f826 100644
+--- a/wsi/swapchain_base.hpp
++++ b/wsi/swapchain_base.hpp
+@@ -232,12 +232,33 @@ public:
+     * @brief Get image's present semaphore
+     *
+     * @param image_index Image's index
++    * @param semaphore Present semaphore for the image.
+     *
+-    * @return the image's present_semaphore
++    * @return VK_SUCCESS on success, or VK_ERROR_VALIDATION_FAILED if the
++    * image index is out of bounds.
+     */
+-   VkSemaphore get_image_present_semaphore(uint32_t image_index)
++   VkResult get_image_present_semaphore(uint32_t image_index, VkSemaphore &semaphore)
+    {
+-      return m_swapchain_images[image_index].get_present_semaphore();
++      if (!is_valid_image_index(image_index))
++      {
++         WSI_LOG_ERROR("Swapchain image index %u is out of bounds.", image_index);
++         return VK_ERROR_VALIDATION_FAILED;
++      }
++
++      semaphore = m_swapchain_images[image_index].get_present_semaphore();
++      return VK_SUCCESS;
++   }
++
++   /**
++    * @brief Check whether an image index belongs to this swapchain.
++    *
++    * @param image_index Image index to check.
++    *
++    * @return True if the image index is valid, false otherwise.
++    */
++   bool is_valid_image_index(uint32_t image_index) const
++   {
++      return image_index < m_swapchain_images.size();
+    }
+ 
+    /**
+@@ -253,8 +274,11 @@ public:
+     *
+     * @param image_count Amount of images in the indices array
+     * @param indices Array of image indices
++    *
++    * @return VK_SUCCESS on success, or VK_ERROR_VALIDATION_FAILED if an index
++    * is out of bounds.
+     */
+-   void release_images(uint32_t image_count, const uint32_t *indices);
++   VkResult release_images(uint32_t image_count, const uint32_t *indices);
+ 
+    /**
+     * @brief Check if bind is allowed for a swapchain image.
