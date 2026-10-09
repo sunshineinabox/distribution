@@ -9,13 +9,20 @@ UI_SERVICE="sway.service essway.service"
 if [ "$(gpudriver)" = "libmali" ]; then
 MALI_DEFAULT_DISPLAY=wayland
 WSI_ALLOW_NON_FIFO_PRESENT_MODE=1
+WSIALLOC_USE_GBM=1
+WLR_DRM_AFBC_ALT_PRIMARY=1
 else
 DISABLE_WSI_LAYER=1
 fi
 EOF
 
-# libmali reads ./mali_debug.config
-# Allows direct scanout, without this forces composition pass
-if [ "$(gpudriver)" = "libmali" ] && [ ! -e /storage/mali_debug.config ]; then
-  echo 'MALI_WAYLAND_AFBC=0' > /storage/mali_debug.config
+MIGRATED="/storage/.config/.rk3566_afbc_migrated"
+
+# AFBC buffers now scan out on the Cluster planes; drop the old linear-only default, once
+if [ ! -e "${MIGRATED}" ]; then
+  if [ -f /storage/mali_debug.config ]; then
+    sed -i '/^MALI_WAYLAND_AFBC=0$/d' /storage/mali_debug.config
+    [ -s /storage/mali_debug.config ] || rm -f /storage/mali_debug.config
+  fi
+  touch "${MIGRATED}"
 fi

@@ -1,0 +1,28 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Fri, 25 Sep 2026 02:12:41 -0700
+Subject: [PATCH] linux-dmabuf: hide AFBC modifiers the display cannot scan out
+
+Rockchip VOP/VOP2 and Amlogic OSD planes reject AFBC TILED and SC
+layouts. When advertised, libmali picks them and the buffer can only
+be composited.
+---
+ types/wlr_linux_dmabuf_v1.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/types/wlr_linux_dmabuf_v1.c b/types/wlr_linux_dmabuf_v1.c
+index b885c25..ea75df9 100644
+--- a/types/wlr_linux_dmabuf_v1.c
++++ b/types/wlr_linux_dmabuf_v1.c
+@@ -811,6 +811,12 @@ static void linux_dmabuf_send_modifiers(struct wl_resource *resource,
+ 
+ 	for (size_t i = 0; i < fmt->len; i++) {
+ 		uint64_t mod = fmt->modifiers[i];
++		// Rockchip VOP/VOP2 and Amlogic OSD cannot scan out TILED or SC AFBC
++		if (mod >> 56 == DRM_FORMAT_MOD_VENDOR_ARM &&
++				((mod >> 52) & 0xf) == DRM_FORMAT_MOD_ARM_TYPE_AFBC &&
++				(mod & (AFBC_FORMAT_MOD_TILED | AFBC_FORMAT_MOD_SC))) {
++			continue;
++		}
+ 		zwp_linux_dmabuf_v1_send_modifier(resource, fmt->format,
+ 			mod >> 32, mod & 0xFFFFFFFF);
+ 	}
