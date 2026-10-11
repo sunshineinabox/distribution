@@ -78,7 +78,7 @@ if [ ${EXT} == "doom" ]; then
     params="${params/-savedir ${SAVE_DIR}/-savedir ${local_savedir}}"
   fi
 else
-  params+=" -iwad ${1}"
+  IWAD=(-iwad "${1}")
 fi
 
 #Set the cores to use
@@ -93,4 +93,4 @@ else
 fi
 
 cd "${RUN_DIR}"
-echo ${params} | ${EMUPERF} xargs /usr/bin/gzdoom >/var/log/gzdoom.log 2>&1
+echo ${params} | ${EMUPERF} xargs /usr/bin/gzdoom "${IWAD[@]}" >/var/log/gzdoom.log 2>&1
