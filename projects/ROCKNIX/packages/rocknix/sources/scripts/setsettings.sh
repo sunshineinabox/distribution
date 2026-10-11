@@ -288,7 +288,7 @@ function add_setting() {
     fi
     local RETROARCH_KEY="${2}"
     local RETROARCH_VALUE="${3}"
-    if [ -z "${RETROARCH_VALUE}" ]& \
+    if [ -z "${RETROARCH_VALUE}" ] && \
        [ ! "${1}" = "none" ]
     then
         RETROARCH_VALUE="${OS_SETTING}"
@@ -858,7 +858,7 @@ function set_analogsupport() {
             add_setting "none" "input_player1_analog_dpad_mode" "0"
         ;;
         *)
-            add_setting "analogue" "input_player1_analog_dpad_mode" "1"
+            add_setting "analogue" "input_player1_analog_dpad_mode"
         ;;
     esac
 }
