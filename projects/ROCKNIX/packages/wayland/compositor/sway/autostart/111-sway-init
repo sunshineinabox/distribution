@@ -142,6 +142,7 @@ fi
 # Start the external display monitor on any device that has DP or HDMI
 # hardware where the driver does not emit DRM hotplug uevents.
 if [ "${QUIRK_DEVICE}" != "Retroid Pocket Duo Lite" ] && # See Duo Lite note above.
+   ! grep -qs Lontium /sys/class/drm/card0-DP-1/edid &&
    ls /sys/class/drm/card*-DP-* /sys/class/drm/card*-HDMI-A-* 2>/dev/null | grep -q .; then
   echo "exec /usr/bin/output_monitor" >> $SWAY_HOME/config
 fi
