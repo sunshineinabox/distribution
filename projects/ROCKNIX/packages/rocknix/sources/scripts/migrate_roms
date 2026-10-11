@@ -12,7 +12,7 @@ do
   if [ ! -d "${GAMES}/roms" ]
   then
     echo "Making ${GAMES}/roms..."
-    mkdir -p "${GAMES}/roms" >>${LOGFILE} 2>&1 1|>>${LOGFILE}
+    mkdir -p "${GAMES}/roms" >>${LOGFILE} 2>&1
   fi
   for DIR in $(find  "${GAMES}/" -type d -maxdepth 1 -mindepth 1 2>/dev/null)
   do
@@ -31,6 +31,6 @@ do
     rsync -av --remove-source-files "${DIR}"/* "${GAMES}/roms/${TARGET_DIR}" >>${LOGFILE} 2>&1
   done
   echo "Clean empties in ${GAMES}..."
-  find "${GAMES}" -type d -empty -delete >>${LOGFILE} 2>&1 1|>>${LOGFILE}
+  find "${GAMES}" -type d -empty -delete >>${LOGFILE} 2>&1
   echo "Your games have been migrated, however you will need to manually clean up stale directories.  Please reboot your system now by running the `reboot` command."
 done
