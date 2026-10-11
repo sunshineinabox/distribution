@@ -60,7 +60,9 @@ function get_config() {
 
 function set_config() {
      #Will search for first key.name at beginning of line and write value to it
-     sed -i "1,/^\(\s*$1\s*=\).*/s//\1$2/" "$ROCKNIX_CONFIGFILE"
+     local val
+     val=$(printf '%s\n' "$2" | sed 's|[\\/&]|\\&|g')
+     sed -i "1,/^\(\s*$1\s*=\).*/s//\1$val/" "$ROCKNIX_CONFIGFILE"
 }
 
 function uncomment_config() {
