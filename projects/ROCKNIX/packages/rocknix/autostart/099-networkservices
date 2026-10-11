@@ -9,6 +9,7 @@ tocon "Starting services..."
 
 for SERVICE in /usr/lib/autostart/daemons/*
 do
+  unset CONF
   source ${SERVICE}
 
 
