@@ -440,7 +440,12 @@ function set_cheevos() {
         add_setting "retroachievements.username" "cheevos_username"
         add_setting "retroachievements.password" "cheevos_password"
         add_setting "none" "cheevos_cmd" "/usr/share/libretro/call_achievements_hooks.sh"
-        add_setting "retroachievements.hardcore" "cheevos_hardcore_mode_enable"
+        if [ "$(game_setting netplay)" = 1 ]
+        then
+            add_setting "none" "cheevos_hardcore_mode_enable" "false"
+        else
+            add_setting "retroachievements.hardcore" "cheevos_hardcore_mode_enable"
+        fi
         add_setting "retroachievements.leaderboards" "cheevos_leaderboards_enable"
         add_setting "retroachievements.verbose" "cheevos_verbose_enable"
         add_setting "retroachievements.screenshot" "cheevos_auto_screenshot"
@@ -465,9 +470,6 @@ function set_netplay() {
     USE_NETPLAY=$(game_setting "netplay")
     if [ "${USE_NETPLAY}" = 1 ]
     then
-        add_setting "none" "savestate_auto_load" "false"
-        add_setting "none" "savestate_auto_save" "false"
-        add_setting "retroachievements.hardcore" "cheevos_hardcore_mode_enable" "false"
         add_setting "global.netplay.nickname" "netplay_nickname"
         add_setting "global.netplay.password" "netplay_password"
         add_setting "netplay_public_announce" "netplay_public_announce"
@@ -804,6 +806,11 @@ function set_autosave() {
             esac
         ;;
     esac
+
+    if [ "$(game_setting netplay)" = 1 ]
+    then
+        SETAUTOSAVE=false
+    fi
 
     add_setting "none" "savestate_directory" "${SNAPSHOTS}/${PLATFORM}"
     if [ ! -d "${SNAPSHOTS}/${PLATFORM}" ]
