@@ -14,4 +14,12 @@ then
 fi
 
 ROOTPASS=$(get_setting root.password)
-setrootpass "${ROOTPASS}"
+if [ -z "${ROOTPASS}" ]
+then
+  ROOTPASS=$(sed -n 's/^root\.password=//p' /usr/config/system/configs/system.cfg)
+fi
+
+if [ -n "${ROOTPASS}" ]
+then
+  setrootpass "${ROOTPASS}"
+fi
