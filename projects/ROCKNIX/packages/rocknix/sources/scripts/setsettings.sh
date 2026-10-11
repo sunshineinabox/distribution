@@ -270,19 +270,15 @@ function game_setting() {
 
 function clear_setting() {
       log "Remove setting [${1}]"
-      if [ ! -f "${TMP_CONFIG}.sed" ]
-      then
-          echo -n 'sed -i "/^'${1}'/d;' >${TMP_CONFIG}.sed
-      else
-          echo -n ' /^'${1}'/d;' >>${TMP_CONFIG}.sed
-      fi
+      echo "/^${1} *=/d" >>${TMP_CONFIG}.sed
 }
 
 function flush_settings() {
-    echo -n '" '${RETROARCH_CONFIG}' >/dev/null 2>&1' >>${TMP_CONFIG}.sed
-    chmod 0755 ${TMP_CONFIG}.sed
-    ${TMP_CONFIG}.sed >/dev/null 2>&1 ||:
-    rm -f ${TMP_CONFIG}.sed
+    if [ -f "${TMP_CONFIG}.sed" ]
+    then
+        sed -i -f ${TMP_CONFIG}.sed ${RETROARCH_CONFIG} >/dev/null 2>&1 ||:
+        rm -f ${TMP_CONFIG}.sed
+    fi
 }
 
 function add_setting() {
