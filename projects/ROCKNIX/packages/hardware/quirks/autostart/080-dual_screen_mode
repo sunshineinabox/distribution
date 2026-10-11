@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (C) 2024 ROCKNIX (https://github.com/ROCKNIX)
 
-count=$(modetest | awk '$3 == "connected" {print $0}' | wc -l)
+count=$(modetest | awk '$3 == "connected" && $4 !~ /^(DP|HDMI)-/ {print $0}' | wc -l)
+# Retroid Dual Screen Add-on
+grep -qs Lontium /sys/class/drm/card*-DP-*/edid && count=$((count + 1))
 
 if [ "$count" -eq 2 ]; then
     dual_screen=true
