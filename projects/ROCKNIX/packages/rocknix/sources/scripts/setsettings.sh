@@ -427,7 +427,7 @@ function set_fps() {
 }
 
 function set_config_save() {
-    add_setting "config_save_on_exit" "false"
+    echo 'config_save_on_exit = "false"' >>${TMP_CONFIG}
 }
 
 function set_cheevos() {
