@@ -7,6 +7,6 @@ PKG_BUILD_FLAGS="${PKG_BUILD_FLAGS/-cfg-libs/}"
 PKG_CONFIGURE_OPTS_TARGET="${PKG_CONFIGURE_OPTS_TARGET/--disable-shared/--disable-static}"
 
 post_makeinstall_target() {
-  ln -sfv /usr/lib/libpcap.so.1 ${INSTALL}/usr/lib/libpcap.so.0.8
+  ln -sfv libpcap.so.1 ${INSTALL}/usr/lib/libpcap.so.0.8
   rm -rf ${INSTALL}/usr/bin
 }
