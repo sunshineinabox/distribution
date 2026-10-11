@@ -90,11 +90,11 @@ case "${ARCH}" in
     scripts/install arm
     ;;
   *)
-    clean_dependents >/dev/null
+    scripts/clean_dependents >/dev/null
     make image
     # rebuild what was built against dependencies that changed during the build
     for _ in 1 2 3; do
-      [ -z "$(clean_dependents)" ] && break
+      [ -z "$(scripts/clean_dependents)" ] && break
       make image
     done
     ;;
