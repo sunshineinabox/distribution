@@ -39,7 +39,7 @@ echo "WLR_BACKENDS=drm,libinput" >> ${env_file}
 
 # Scan connectors
 card=/sys/class/drm/card${card_no}
-connected_cons=()
+internal_cons=()
 for connector in ${card}/card${card_no}*/
 do
     status=$(cat ${connector}/status)
@@ -48,11 +48,11 @@ do
         if [[ $connector == *"DSI"* || $connector == *"eDP"* ]]; then
             internal=$(basename "$connector")
             internal=${internal: +6}
+            internal_cons+=("$internal")
         fi
     # Simply prioritize later connectors, meaning HDMI/DP priority
 	con=$(basename $connector)
 	con=${con: +6}
-	connected_cons+=("$con")
     fi
 done
 
@@ -162,7 +162,7 @@ fi
 
 # Move the secondary window to the second output and apply vertical orientation for applicable cases
 if [ "${DEVICE_HAS_DUAL_SCREEN}" = "true" ]; then
-  second_con=$([[ "${connected_cons[0]}" == "$con" ]] && echo "${connected_cons[1]}" || echo "${connected_cons[0]}")
+  second_con=$([[ "${internal_cons[0]}" == "$con" ]] && echo "${internal_cons[1]}" || echo "${internal_cons[0]}")
   [ "${QUIRK_DEVICE}" = "Retroid Pocket Duo Lite" ] && second_con="DP-1"
   echo "SDL_VIDEO_DISPLAY_PRIORITY=${con},${second_con}" >> ${env_file}
   echo 'for_window [title=".*(Secondary|\[w2\]|Sub|Bottom|Screen 2|GamePad).*"] move window to output '"${second_con}" >> $SWAY_HOME/config
