@@ -15,7 +15,10 @@ then
   mkdir -p /tmp/cache
 fi
 
-ln -sf /tmp/cache /storage/cache/.cores
+if [ -d "/storage/cache" ]
+then
+  ln -sf /tmp/cache /storage/cache/.cores
+fi
 
 if [ ! -d "/storage/.config/profile.d" ]
 then
