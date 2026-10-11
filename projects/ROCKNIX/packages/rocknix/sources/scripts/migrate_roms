@@ -14,9 +14,9 @@ do
     echo "Making ${GAMES}/roms..."
     mkdir -p "${GAMES}/roms" >>${LOGFILE} 2>&1
   fi
-  for DIR in $(find  "${GAMES}/" -type d -maxdepth 1 -mindepth 1 2>/dev/null)
+  find "${GAMES}/" -type d -maxdepth 1 -mindepth 1 -print0 2>/dev/null | while IFS= read -r -d '' DIR
   do
-    TARGET_DIR=$(basename ${DIR})
+    TARGET_DIR=$(basename "${DIR}")
     echo "Working on ${DIR}..."
     if [[ "${DIR}" =~ roms$ ]]
     then
