@@ -22,7 +22,7 @@ mode2="$(/usr/bin/drm_tool list |  awk '/1920x1080.*60/ {print substr($2,1,lengt
 if [ $xres -eq "1280" ]; then
   echo $mode | tee /var/run/drmMode
 elif [ $xres -eq "1920" ]; then
-  echo $mode2 | tee /var/run/drmConn
+  echo $mode2 | tee /var/run/drmMode
 else
   echo 0 | tee /var/run/drmMode
   echo 1 | tee /var/run/drmConn
