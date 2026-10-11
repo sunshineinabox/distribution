@@ -41,5 +41,7 @@ pre_configure() {
 
 makeinstall_target() {
   mkdir -p ${INSTALL}/usr/lib
-    cp -rf ${PKG_BUILD}/.${TARGET_NAME}/lib/libcom_err.so* ${INSTALL}/usr/lib
+    cp ${PKG_BUILD}/.${TARGET_NAME}/lib/libcom_err.so.2.1 ${INSTALL}/usr/lib
+    ln -sf libcom_err.so.2.1 ${INSTALL}/usr/lib/libcom_err.so.2
+    ln -sf libcom_err.so.2 ${INSTALL}/usr/lib/libcom_err.so
 }
