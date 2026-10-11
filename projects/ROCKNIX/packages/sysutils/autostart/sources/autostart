@@ -20,7 +20,7 @@ then
   for script in "/usr/lib/autostart/quirks/platforms/${HW_DEVICE}"/*
   do
     log "Run ${script}"
-    if [ -f "${script}" ]
+    if [ -f "${script}" ] && [ "${script##*/}" != "modules.keep" ]
     then
       "${script}" 2>&1 >>${BOOTLOG}
     fi
@@ -35,7 +35,7 @@ then
   for script in "/usr/lib/autostart/quirks/devices/${QUIRK_DEVICE}"/*
   do
     log "Run ${script}"
-    if [ -f "${script}" ]
+    if [ -f "${script}" ] && [ "${script##*/}" != "modules.keep" ]
     then
       "${script}" 2>&1 >>${BOOTLOG}
     fi
