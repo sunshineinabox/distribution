@@ -1116,12 +1116,11 @@ function set_gambatte() {
     if [ "${CORE}" = "gambatte" ]
     then
         GAMBATTECONF="${RETROARCH_PATH}/config/Gambatte/Gambatte.opt"
-        if [ ! -f "GAMBATTECONF" ]
+        if [ ! -f "${GAMBATTECONF}" ]
         then
             echo 'gambatte_gbc_color_correction = "disabled"' > ${GAMBATTECONF}
         else
-            sed -i "/gambatte_gb_colorization =/d" ${GAMBATTECONF}
-            sed -i "/gambatte_gb_internal_palette =/d" ${GAMBATTECONF}
+            sed -i "/gambatte_gb_colorization =/d; /gambatte_gb_internal_palette =/d; /gambatte_gb_palette_/d; /gambatte_gb_link_/d" ${GAMBATTECONF}
         fi
         local COLORIZATION=$(game_setting renderer.colorization)
         local TWB1_COLORIZATION=$(game_setting renderer.twb1_colorization)
