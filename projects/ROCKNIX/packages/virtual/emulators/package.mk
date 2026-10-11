@@ -1057,7 +1057,7 @@ makeinstall_target() {
   add_emu_core nesh retroarch mesen false
   case ${DEVICE} in
     H700|RK3326|RK3399|RK3576|RK3566|RK3588|SM4450|SM6115|SM8250|SM8550|SM8650|SM8750|AMD64)
-      add_emu_core nesh mednafen nesh false
+      add_emu_core nesh mednafen nes false
       ;;
   esac
   case ${DEVICE} in
