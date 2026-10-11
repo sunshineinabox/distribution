@@ -15,6 +15,7 @@ info_quirks() {
   for QUIRK in /usr/lib/autostart/quirks/platforms/"${HW_DEVICE}"/info.d/${1}/* \
                /usr/lib/autostart/quirks/devices/"${QUIRK_DEVICE}"/info.d/${1}/*
   do
+    [ -x "${QUIRK}" ] || continue
     "${QUIRK}" 2>/dev/null
   done
 }
