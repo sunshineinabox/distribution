@@ -56,10 +56,12 @@ function release_lock() {
 }
 
 function del_setting() {
+  local key
   wait_lock
   if [[ "${1}" =~ ^[[:alnum:]] ]]
   then
-    sed -i "/^${1}=/d" "${J_CONF}"
+    key=$(printf '%s\n' "${1}" | sed 's|[][\\/.^$*]|\\&|g')
+    sed -i "/^${key}=/d" "${J_CONF}"
   fi
   release_lock
 }
