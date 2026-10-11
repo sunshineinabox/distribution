@@ -1,5 +1,6 @@
 [Unit]
 Description=BatteryPlus service
+After=userconfig.service
 
 [Service]
 ExecStartPre=/usr/bin/batteryplus-init

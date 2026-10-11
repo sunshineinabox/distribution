@@ -1,6 +1,6 @@
 [Unit]
 Description=touchscreen keyboard service
-After=input.service
+After=input.service userconfig.service
 Before=rocknix.target
 StartLimitIntervalSec=0
 

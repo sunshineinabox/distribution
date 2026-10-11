@@ -1,5 +1,6 @@
 [Unit]
 Description=AC/Battery Performance Service
+After=userconfig.service
 Before=rocknix.target
 StartLimitIntervalSec=0
 
