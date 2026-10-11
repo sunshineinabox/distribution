@@ -12,8 +12,8 @@ EE_CONF="/storage/.config/system/configs/emuoptions.conf"
 
 case "$1" in
 "set")
-	PAT=$(echo "$2" | sed -e 's|\"|\\"|g' | sed -e 's|\[|\\\[|g' | sed -e 's|\]|\\\]|g')
-	sed -i "/$PAT/d" "${EE_CONF}"
+	PAT=$(printf '%s\n' "$2" | sed 's|[][\\/.^$*]|\\&|g')
+	sed -i "/^#*${PAT}=/d" "${EE_CONF}"
 	S2=${2}
 	S3=${3}
 	shift 2
