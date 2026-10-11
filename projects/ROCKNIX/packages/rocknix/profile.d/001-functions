@@ -68,7 +68,7 @@ function del_setting() {
 
 function sort_settings() {
   wait_lock
-  if grep "^[a-z0-9]" "${J_CONF}" | sort >"${J_CONF}.tmp"
+  if grep "^[[:alnum:]]" "${J_CONF}" | sort >"${J_CONF}.tmp"
   then
     mv -f "${J_CONF}.tmp" "${J_CONF}"
   else
