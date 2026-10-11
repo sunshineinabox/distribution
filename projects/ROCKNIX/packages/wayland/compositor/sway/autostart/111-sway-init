@@ -110,7 +110,7 @@ echo "${output} max_render_time off" >> $SWAY_HOME/config
 
 # Retroid Dual Screen Add-on
 # Check the display exists first before we do anything
-if hexdump -C /sys/class/drm/card0-DP-1/edid | grep -q "Lontium"; then
+if grep -qs Lontium /sys/class/drm/card0-DP-1/edid; then
   echo "output DP-1 transform 270" >> $SWAY_HOME/config
   echo "output DP-1 bg #000000 solid_color" >> $SWAY_HOME/config
   echo "output DP-1 allow_tearing yes"  >> $SWAY_HOME/config
