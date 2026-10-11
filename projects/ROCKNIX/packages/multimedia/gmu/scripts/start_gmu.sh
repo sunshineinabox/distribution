@@ -39,9 +39,10 @@ else
   sed -i "s~SDL.Fullscreen=.*\$~SDL.Fullscreen=yes~g" ${GMUCONFIG}
 fi
 
+PLAYLIST=()
 if [ "${1}" ]
 then
-  PLAYLIST="-l \"${1}\""
+  PLAYLIST=(-l "${1}")
 fi
 
 ### Set up controls
@@ -56,4 +57,4 @@ do
 done
 
 cd /usr/local/share/gmu
-/usr/local/bin/gmu.bin -d /usr/local/etc/gmu -c /storage/.config/gmu/gmu.conf ${PLAYLIST}
+/usr/local/bin/gmu.bin -d /usr/local/etc/gmu -c /storage/.config/gmu/gmu.conf "${PLAYLIST[@]}"
