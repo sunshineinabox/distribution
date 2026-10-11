@@ -731,14 +731,16 @@ function set_overlay() {
         0|false|none)
         ;;
         *)
-            write_bezel_config
-            exit 0
+            if write_bezel_config
+            then
+                return 0
+            fi
         ;;
     esac
 
     local OVERLAY="$(game_setting overlayset)"
     case ${OVERLAY} in
-        0|false|none)
+        ""|0|false|none)
             add_setting "none" "input_overlay_enable" "false"
             add_setting "none" "input_overlay" ""
         ;;
