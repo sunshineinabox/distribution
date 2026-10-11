@@ -1,6 +1,6 @@
 [Unit]
 Description=Fix unset volumes on RK3566 devices 
-After=rocknix.target
+After=rocknix-autostart.service
 Before=essway.service
 
 [Service]
