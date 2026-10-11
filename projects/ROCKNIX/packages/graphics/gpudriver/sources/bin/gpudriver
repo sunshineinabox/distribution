@@ -28,7 +28,7 @@ load_driver() {
 
       # Bind-mount mali GLES libraries over mesa if not already done.
       # Use mount output (not /proc/mounts) to avoid squashfs false positives.
-      mount | grep -q "on /usr/lib/libEGL.so" || find /usr/{lib,lib32}/mali -type f -exec bash -c 'lib={}; mount --bind $lib ${lib/\/mali\//\/}' ';'
+      mount | grep -q "on /usr/lib/libEGL.so" || find /usr/{lib,lib32}/mali -type f -exec bash -c 'dst=${1/\/mali\//\/}; [ ! -e "${dst}" ] || mount --bind "$1" "${dst}"' _ {} ';'
       # Portmaster is not ready for SDL in glesonly subdir, so override libs the dirty way
       if [ -d /usr/lib/glesonly ]; then
         mount | grep -q "on /usr/lib/libSDL2" || find /usr/{lib,lib32}/glesonly -type f -exec bash -c 'lib={}; mount --bind $lib ${lib/\/glesonly\//\/}' ';'
