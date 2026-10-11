@@ -13,4 +13,5 @@ PKG_TOOLCHAIN="python"
 
 post_makeinstall_target() {
   python_remove_source
+  sed -i '1s|^#!.*|#!/usr/bin/python3|' ${INSTALL}/usr/bin/pydtc
 }
