@@ -282,7 +282,7 @@ case ${EMULATOR} in
     # Configure platform specific requirements
     case ${PLATFORM} in
       "atomiswave")
-        rm ${ROMNAME}.nvmem*
+        rm -f "${ROMNAME}".nvmem*
       ;;
       "scummvm")
         GAMEDIR=$(cat "${ROMNAME}" | awk 'BEGIN {FS="\""}; {print $2}')
