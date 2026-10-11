@@ -21,7 +21,7 @@ makeinstall_target() {
   cd ${PKG_BUILD}
   LIBROOT="${ROOT}/build.${DISTRO}-${DEVICE}.${LIBARCH}/image/system/"
   mkdir -p ${INSTALL}/usr/lib32
-  rsync -al ${LIBROOT}/usr/lib/* ${INSTALL}/usr/lib32 >/dev/null 2>&1
+  rsync -al --exclude=/{bluetooth,bluez,cups,dbus,libinput,systemd,udev,weston} ${LIBROOT}/usr/lib/* ${INSTALL}/usr/lib32 >/dev/null 2>&1
   rsync -al ${LIBROOT}/usr/lib32/* ${INSTALL}/usr/lib32 >/dev/null 2>&1
   mkdir -p ${INSTALL}/usr/lib
   ln -s /usr/lib32/${LDSO} ${INSTALL}/usr/lib/${LDSO}
