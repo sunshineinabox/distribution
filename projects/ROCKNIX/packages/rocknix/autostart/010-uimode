@@ -5,6 +5,8 @@
 # Minimal OS variable loading for performance
 . /etc/profile.d/001-functions
 
+[ -e "/usr/share/weston/weston.ini" ] || exit 0
+
 tocon "Configuring user interface..."
 
 UIMODE=$(get_setting desktop.enabled)
