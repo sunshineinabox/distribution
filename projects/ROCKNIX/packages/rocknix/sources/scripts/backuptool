@@ -19,6 +19,8 @@ BACKUPFOLDER="/storage/roms/backup"
 BACKUPFILE="${BACKUPFOLDER}/${OS_NAME}_BACKUP.zip"
 mkdir -p ${BACKUPFOLDER}
 
+mapfile -t THEMES < <(find /storage/.emulationstation/themes/* -type d -maxdepth 0 -not -path "*es-theme-art-book-next" -not -path "*system-theme")
+
 DEFAULT=(
     /storage/.config/fancontrol.conf
     /storage/.config/backuptool.conf
@@ -31,7 +33,7 @@ DEFAULT=(
     /storage/.emulationstation/es_*.cfg
     /storage/.emulationstation/scripts/*
     /storage/.emulationstation/themesettings/*
-    $(find /storage/.emulationstation/themes/* -type d -maxdepth 0 -not -path "*es-theme-art-book-next" -not -path "*system-theme")
+    "${THEMES[@]}"
 )
 
 if [ -e "/storage/.config/backuptool.conf" ]
@@ -42,12 +44,12 @@ then
         WARN="Error loading custom backuptool configs. Using defaults."
         ${DEBUG} && echo "${WARN}"
         logger -t backuptool "${WARN}"
-        COMPRESSLOCATIONS=(${DEFAULT[@]})
+        COMPRESSLOCATIONS=("${DEFAULT[@]}")
     else
-        COMPRESSLOCATIONS=(${LOCATIONS[@]})
+        COMPRESSLOCATIONS=("${LOCATIONS[@]}")
     fi
 else
-    COMPRESSLOCATIONS=(${DEFAULT[@]})
+    COMPRESSLOCATIONS=("${DEFAULT[@]}")
 fi
 
 case "${1}" in
@@ -63,6 +65,6 @@ case "${1}" in
         fi
         [ -f "${BACKUPFILE}" ] && rm "${BACKUPFILE}"
         zip -9 -r ${BACKUPFILE} \
-        ${COMPRESSLOCATIONS[@]}
+        "${COMPRESSLOCATIONS[@]}"
     ;;
 esac
