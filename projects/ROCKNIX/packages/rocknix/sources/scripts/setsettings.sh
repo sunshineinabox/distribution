@@ -531,7 +531,7 @@ EOF
             ;;
             client)
                 local NETPLAY_HOST_IP=$(get_setting global.netplay.host)
-                add_setting "global.netplay.port" "${NETPLAY_PORT}"
+                add_setting "global.netplay.port" "netplay_ip_port" "${NETPLAY_PORT}"
                 if [ ! -z "${NETPLAY_HOST_IP}" ]
                 then
                     add_setting "none" "netplay_ip_address" "${NETPLAY_HOST_IP}"
