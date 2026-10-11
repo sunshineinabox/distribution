@@ -22,7 +22,7 @@ then
     log "Run ${script}"
     if [ -f "${script}" ] && [ "${script##*/}" != "modules.keep" ]
     then
-      "${script}" 2>&1 >>${BOOTLOG}
+      "${script}" >>${BOOTLOG} 2>&1
     fi
   done
 fi
@@ -37,7 +37,7 @@ then
     log "Run ${script}"
     if [ -f "${script}" ] && [ "${script##*/}" != "modules.keep" ]
     then
-      "${script}" 2>&1 >>${BOOTLOG}
+      "${script}" >>${BOOTLOG} 2>&1
     fi
   done
 fi
@@ -50,7 +50,7 @@ systemctl start rocknix-automount
 for script in /usr/lib/autostart/common/*
 do
   log "Run ${script}"
-  ${script} 2>&1 >>${BOOTLOG}
+  ${script} >>${BOOTLOG} 2>&1
 done
 wait
 
@@ -62,7 +62,7 @@ then
     log "Run ${script}"
     if [ -f "${script}" ]
     then
-      "${script}" 2>&1 >>${BOOTLOG}
+      "${script}" >>${BOOTLOG} 2>&1
     fi
   done
 fi
@@ -73,7 +73,7 @@ then
   for script in /storage/.config/autostart/*
   do
     log "Run ${script}"
-   ${script} 2>&1 >>${BOOTLOG}
+   ${script} >>${BOOTLOG} 2>&1
   done
 fi
 wait
@@ -85,13 +85,13 @@ log "Startup complete..."
 . /etc/profile
 
 ### Lock is a prerequisite for emustation
-rm /run/rocknix/start.games 2>&1 >>${BOOTLOG}
-touch /run/rocknix/start.games 2>&1 >>${BOOTLOG}
+rm -f /run/rocknix/start.games >>${BOOTLOG} 2>&1
+touch /run/rocknix/start.games >>${BOOTLOG} 2>&1
 log "Starting ${UI_SERVICE}..."
-systemctl start ${UI_SERVICE} 2>&1 >>${BOOTLOG} &
+systemctl start ${UI_SERVICE} >>${BOOTLOG} 2>&1 &
 
 DEVICE_CPU_GOVERNOR=$(get_setting system.cpugovernor)
-${DEVICE_CPU_GOVERNOR} 2>&1 >>${BOOTLOG}
+${DEVICE_CPU_GOVERNOR} >>${BOOTLOG} 2>&1
 log "Autostart complete..."
 
 clear >/dev/console
