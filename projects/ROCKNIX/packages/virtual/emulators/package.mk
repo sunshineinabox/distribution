@@ -323,7 +323,6 @@ makeinstall_target() {
   add_emu_core cps1 retroarch mame2003_plus false
   add_emu_core cps1 retroarch mame2010 false
   add_emu_core cps1 retroarch fbalpha2012 false
-  add_emu_core cps1 AdvanceMame AdvanceMame false
   add_es_system cps1
 
   ### Capcom Playsystem 2
@@ -331,7 +330,6 @@ makeinstall_target() {
   add_emu_core cps2 retroarch mame2003_plus false
   add_emu_core cps2 retroarch mame2010 false
   add_emu_core cps2 retroarch fbalpha2012 false
-  add_emu_core cps2 AdvanceMame AdvanceMame false
   add_es_system cps2
 
   ### Capcom Playsystem 3
@@ -339,7 +337,6 @@ makeinstall_target() {
   add_emu_core cps3 retroarch mame2003_plus false
   add_emu_core cps3 retroarch mame2010 false
   add_emu_core cps3 retroarch fbalpha2012 false
-  add_emu_core cps3 AdvanceMame AdvanceMame false
   add_es_system cps3
 
   ### Daphne
@@ -511,10 +508,10 @@ makeinstall_target() {
   add_emu_core gba retroarch beetle_gba false
   add_emu_core gba retroarch skyemu false
   case ${DEVICE} in
-    H700|RK3326|RK3576|RK3566|S922X)
+    H700|RK3326|RK3576|RK3566|RK3588|SM6115)
       add_emu_core gba retroarch gpsp false
       ;;
-    RK3399|RK3588|SM4450|SM6115|SM8250|SM8550)
+    RK3399|SM4450|SM8250|SM8550)
       add_emu_core gba retroarch gpsp false
       add_emu_core gba nanoboyadvance nanoboyadvance-sa false
       ;;
