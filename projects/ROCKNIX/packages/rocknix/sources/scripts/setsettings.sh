@@ -632,7 +632,7 @@ EOF
 function set_translation() {
     local USE_AI_SERVICE="$(game_setting ai_service_enabled)"
     case ${USE_AI_SERVICE} in
-        0|false|none)
+        ""|0|false|none)
             add_setting "none" "ai_service_enable" "false"
         ;;
         *)
@@ -692,7 +692,7 @@ function set_rgascale() {
 function set_shader() {
     local SHADER="$(game_setting shaderset)"
     case ${SHADER} in
-        0|false|none)
+        ""|0|false|none)
             add_setting "none" "video_shader_enable" "false"
         ;;
         *)
@@ -706,7 +706,7 @@ function set_shader() {
 function set_filter() {
     local FILTER="$(game_setting videofilter)"
     case ${FILTER} in
-        0|false|none)
+        ""|0|false|none)
             add_setting "none" "video_filter" ""
         ;;
         *)
