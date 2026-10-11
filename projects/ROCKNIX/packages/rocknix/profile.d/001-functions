@@ -39,7 +39,7 @@ function get_setting() {
   do
     if [[ $'\n'${settings} =~ $'\n'"${key}="${rest_of_line} ]] && [ -n "${BASH_REMATCH[1]}" ]
     then
-      echo ${BASH_REMATCH[1]}
+      printf '%s\n' "${BASH_REMATCH[1]}"
       return
     fi
   done
