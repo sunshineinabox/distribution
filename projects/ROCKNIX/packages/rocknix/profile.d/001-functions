@@ -129,7 +129,7 @@ function get_es_setting() {
 
 function fbwidth() {
   local ORIENTATION=$(</sys/devices/virtual/graphics/fbcon/rotate)
-  if [ "${ORIENTATION}" = "0" ]
+  if [[ "${ORIENTATION}" = [02] ]]
   then
     fbset | awk '/geometry/ {print $2}'
   else
@@ -139,7 +139,7 @@ function fbwidth() {
 
 function fbheight() {
   local ORIENTATION=$(</sys/devices/virtual/graphics/fbcon/rotate)
-  if [ "${ORIENTATION}" = "0" ]
+  if [[ "${ORIENTATION}" = [02] ]]
   then
     fbset | awk '/geometry/ {print $3}'
   else
