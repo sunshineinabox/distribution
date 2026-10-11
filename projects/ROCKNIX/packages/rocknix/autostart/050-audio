@@ -46,6 +46,6 @@ fi
 /usr/bin/volume ${VOLUME}
 
 ### Run quantum audio hack if exists
-if [ -n "/usr/sbin/quantum" ]; then
+if [ -x "/usr/sbin/quantum" ]; then
   /usr/sbin/quantum
 fi
