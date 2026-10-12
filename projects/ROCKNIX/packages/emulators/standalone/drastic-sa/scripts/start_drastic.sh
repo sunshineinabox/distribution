@@ -81,9 +81,8 @@ else
 fi
 
 cd /storage/.config/drastic/
-@HOTKEY@
 
-$GPTOKEYB "drastic" -c "drastic.gptk" &
+gptokeyb -c "drastic.gptk" &
 # Fix actual touch inputs by replacing touch->mouse translation and add hw mic support
 export LD_PRELOAD="/usr/lib/libdrastouch.so"
 export SDL_TOUCH_MOUSE_EVENTS="0"

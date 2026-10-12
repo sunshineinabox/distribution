@@ -259,11 +259,11 @@ ln -sf ${CONF_DIR} /storage/.local/share/azahar
 # Run Azahar Emulator
 if [ "${EMOUSE}" = "0" ]; then
   # Use base gptk file
-  ${GPTOKEYB} azahar -c ${CONF_DIR}/azahar.gptk &
+  gptokeyb -c ${CONF_DIR}/azahar.gptk &
 else
   # Combine base gptk file with mouse control gptk file, inserting line break in between
   cat ${CONF_DIR}/azahar.gptk <(echo) ${CONF_DIR}/azahar_mouse_addon.gptk > /tmp/azahar.gptk
-  ${GPTOKEYB} azahar -c /tmp/azahar.gptk &
+  gptokeyb -c /tmp/azahar.gptk &
 fi
 
 ${EMUPERF} /usr/bin/azahar "${1}"

@@ -51,6 +51,6 @@ else
 fi
 
 # Run SkyEmu
-$GPTOKEYB "SkyEmu" -c "/storage/.config/SkyEmu/SkyEmu.gptk" &
+gptokeyb -c "/storage/.config/SkyEmu/SkyEmu.gptk" &
 ${EMUPERF} /usr/bin/SkyEmu "${1}"
 kill -9 "$(pidof gptokeyb)"

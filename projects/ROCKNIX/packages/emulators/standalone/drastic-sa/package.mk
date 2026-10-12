@@ -29,12 +29,3 @@ makeinstall_target() {
   mkdir -p ${INSTALL}/usr/config/drastic/microphone
     cp -a ${PKG_DIR}/sources/microphone.wav ${INSTALL}/usr/config/drastic/microphone/
 }
-
-post_install() {
-  case ${DEVICE} in
-    RK3588) HOTKEY="export HOTKEY="guide"" ;;
-    *) HOTKEY="" ;;
-  esac
-
-  sed -e "s/@HOTKEY@/${HOTKEY}/g" -i ${INSTALL}/usr/bin/start_drastic.sh
-}

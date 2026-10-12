@@ -156,6 +156,6 @@ fi
   echo "Launching /usr/bin/flycast ${1}"
 
 #Run flycast emulator
-$GPTOKEYB "flycast" -c "${CONF_DIR}/flycast.gptk" &
+gptokeyb -c "${CONF_DIR}/flycast.gptk" &
 ${EMUPERF} /usr/bin/flycast "${1}"
 kill -9 "$(pidof gptokeyb)"
