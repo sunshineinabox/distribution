@@ -65,11 +65,6 @@ post_install() {
   PANFROST=""
   [ "${GRAPHICS_DRIVER}" = "panfrost" ] && PANFROST="export MESA_GL_VERSION_OVERRIDE=3.3"
 
-  HOTKEY=""
-  case "${DEVICE}" in
-    RK3588|S922X|SM*) hotkey='export HOTKEY="guide"' ;;
-  esac
-
   LIBMALI=""
   case "${DEVICE}" in
     RK3588|S922X|RK3566)
@@ -78,7 +73,6 @@ post_install() {
   esac
 
   sed -e "s|@PANFROST@|${PANFROST}|g" \
-      -e "s|@HOTKEY@|${HOTKEY}|g" \
       -e "s|@LIBMALI@|${LIBMALI}|g" \
       -i ${INSTALL}/usr/bin/start_melonds.sh
 }

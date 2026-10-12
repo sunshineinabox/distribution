@@ -213,7 +213,6 @@ case ${HW_DEVICE} in
 esac
 
 @PANFROST@
-@HOTKEY@
 @LIBMALI@
 
 #Generate a new MelonDS.toml each run (temporary hack)
@@ -223,6 +222,6 @@ rm -rf "${CONF_DIR}/melonDS.toml"
 /usr/bin/cheevos_melonds.sh
 
 #Run MelonDS emulator
-$GPTOKEYB "melonDS" -c "${CONF_DIR}/melonDS.gptk" &
+gptokeyb -c "${CONF_DIR}/melonDS.gptk" &
 ${EMUPERF} /usr/bin/melonDS -f "${ROM}"
 kill -9 "$(pidof gptokeyb)"
