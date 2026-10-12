@@ -1,6 +1,6 @@
 [Unit]
 Description=Samba SMB Daemon
-Wants=network-online.target nmbd.service avahi-daemon.service
+Wants=network-online.target nmbd.service avahi-daemon.service wsdd2.service
 After=network-online.target nmbd.service avahi-daemon.service
 ConditionPathExists=!/storage/.cache/services/samba.disabled
 ConditionPathExists=/run/samba/smb.conf
