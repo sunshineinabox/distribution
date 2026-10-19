@@ -1,0 +1,115 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026-present ROCKNIX (https://rocknix.org)
+
+. /etc/profile.d/001-functions
+
+OVERLAY="rk3566-undervolt-cpu-vendor.dtbo"
+TEMPLATE="/usr/share/device-tree-overlays/rk3566-cpu-vendor.dtbo"
+OPP_TABLE="/proc/device-tree/opp-table-0"
+MARKER="/storage/.cache/cpu-binning-reboot"
+
+CURRENT=$(get_setting system.undervolt-cpu)
+if [ -n "${CURRENT}" ] && [ "${CURRENT}" != "${OVERLAY}" ]; then
+  exit 0
+fi
+
+OTP=$(ls /sys/bus/nvmem/devices/rockchip-otp*/nvmem 2>/dev/null | head -n 1)
+if [ -z "${OTP}" ] || [ ! -f "${TEMPLATE}" ] || ! command -v fdtput >/dev/null; then
+  exit 0
+fi
+
+otp_u8() {
+  od -A n -t u1 -j $1 -N 1 "${OTP}" | tr -d ' '
+}
+
+otp_u16() {
+  od -A n -t u2 -j $1 -N 2 "${OTP}" | tr -d ' '
+}
+
+live_uv() {
+  local hex
+  hex=$(od -A n -t x1 -N 4 "${OPP_TABLE}/opp-${1}000000/opp-microvolt" 2>/dev/null | tr -d ' \n')
+  echo $((16#${hex:-0}))
+}
+
+PVTM=$(( $(otp_u16 42) * 10 ))
+MBIST=$(otp_u8 9)
+OPP_MIN=$(otp_u16 54)
+OPP_MAX=$(otp_u16 56)
+OPP_VOLT=$(otp_u8 58)
+
+FREQS=(408 600 816 1104 1416 1608 1800)
+L0=(850000 850000 850000 900000 1025000 1100000 1150000)
+L1=(850000 850000 850000 850000 975000 1050000 1100000)
+L2=(850000 850000 850000 850000 950000 1025000 1075000)
+L3=(850000 850000 850000 850000 925000 1000000 1050000)
+VMIN=(0 825000 900000 950000)
+VMAX=1150000
+
+if [ ${PVTM} -gt 91000 ] && [ ${PVTM} -le 100000 ]; then
+  LEVEL=3
+  TABLE=("${L3[@]}")
+elif [ ${PVTM} -gt 87000 ] && [ ${PVTM} -le 91000 ]; then
+  LEVEL=2
+  TABLE=("${L2[@]}")
+elif [ ${PVTM} -gt 84000 ] && [ ${PVTM} -le 87000 ]; then
+  LEVEL=1
+  TABLE=("${L1[@]}")
+else
+  LEVEL=0
+  TABLE=("${L0[@]}")
+fi
+
+VOLTS=()
+for i in "${!FREQS[@]}"; do
+  uv=${TABLE[$i]}
+  if [ ${OPP_VOLT} -gt 0 ] && [ ${FREQS[$i]} -ge ${OPP_MIN} ] && [ ${FREQS[$i]} -le ${OPP_MAX} ]; then
+    uv=$(( uv + OPP_VOLT * 1000 ))
+    [ ${uv} -gt ${VMAX} ] && uv=${VMAX}
+  fi
+  if [ ${MBIST} -ge 1 ] && [ ${MBIST} -le 3 ] && [ ${uv} -lt ${VMIN[$MBIST]} ]; then
+    uv=${VMIN[$MBIST]}
+  fi
+  VOLTS+=(${uv})
+done
+
+echo "cpu-binning: pvtm=${PVTM} L${LEVEL} mbist=${MBIST} opp_info=${OPP_MIN}-${OPP_MAX}MHz+${OPP_VOLT}mV volts=${VOLTS[*]}"
+
+if [ -z "${CURRENT}" ] && [ "${VOLTS[*]}" = "${L0[*]}" ]; then
+  exit 0
+fi
+
+TMP=$(mktemp)
+cp "${TEMPLATE}" "${TMP}"
+for i in "${!FREQS[@]}"; do
+  fdtput -t u "${TMP}" "/fragment@0/__overlay__/opp-${FREQS[$i]}000000" opp-microvolt ${VOLTS[$i]} ${VOLTS[$i]} ${VMAX}
+done
+if ! cmp -s "${TMP}" "/flash/overlays/${OVERLAY}"; then
+  mount -o remount,rw /flash
+  cp "${TMP}" "/flash/overlays/${OVERLAY}"
+  sync
+  mount -o remount,ro /flash
+fi
+rm -f "${TMP}"
+
+if [ "${CURRENT}" != "${OVERLAY}" ]; then
+  dtb_overlay set undervolt-cpu "${OVERLAY}"
+fi
+
+TOO_LOW=0
+for i in "${!FREQS[@]}"; do
+  [ -e "${OPP_TABLE}/opp-${FREQS[$i]}000000/opp-microvolt" ] || continue
+  [ $(live_uv ${FREQS[$i]}) -lt ${VOLTS[$i]} ] && TOO_LOW=1
+done
+
+if [ ${TOO_LOW} -eq 0 ]; then
+  rm -f "${MARKER}"
+elif [ "$(cat "${MARKER}" 2>/dev/null)" != "${VOLTS[*]}" ]; then
+  echo "${VOLTS[*]}" >"${MARKER}"
+  sync
+  echo "cpu-binning: running below this chip's voltages, rebooting to apply them"
+  systemctl reboot
+else
+  echo "cpu-binning: still below this chip's voltages after a reboot, not rebooting again"
+fi
