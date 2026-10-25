@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sat, 24 Oct 2026 16:05:00 -0700
+Subject: [PATCH] msm-firmware-loader: link the sensors registry without a
+ fastrpc user
+
+ROCKNIX runs hexagonrpcd as root and its busybox mount has no
+--map-users. Skip the id-mapped persist mount when there is no fastrpc
+user and link the registry from the plain persist mount.
+---
+ msm-firmware-loader.sh | 7 ++++++-
+ 1 file changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/msm-firmware-loader.sh b/msm-firmware-loader.sh
+--- a/msm-firmware-loader.sh
++++ b/msm-firmware-loader.sh
+@@ -164,7 +164,7 @@ do
+ 		# Some devices have 600 permissions on persist, therefore we need an additional
+ 		# mount with UID and GID mappings for hexagonrpcd to access it
+ 		sensors_file="$BASEDIR/mnt/persist/sensors/registry/registry/sensors_registry"
+-		if [ "$PARTNAME" = "persist" ] && [ -f "$sensors_file" ]
++		if [ "$PARTNAME" = "persist" ] && [ -f "$sensors_file" ] && id fastrpc > /dev/null 2>&1
+ 		then
+ 			source_uid="$(stat -c '%u' "$sensors_file")"
+ 			source_gid="$(stat -c '%g' "$sensors_file")"
+@@ -244,6 +244,11 @@ fi
+ 
+ link_path "$BASEDIR/mnt/vendor$(ab_get_slot)/etc/sensors/config" "$BASEDIR/hexagonrpc/sensors/config"
+ link_path "$BASEDIR/mnt/persist-fastrpc/sensors/registry/registry" "$BASEDIR/hexagonrpc/sensors/registry"
++# Without a fastrpc user hexagonrpcd runs as root and reads persist directly
++if ! [ -e "$BASEDIR/hexagonrpc/sensors/registry" ]
++then
++	link_path "$BASEDIR/mnt/persist/sensors/registry/registry" "$BASEDIR/hexagonrpc/sensors/registry"
++fi
+ link_path "$BASEDIR/mnt/vendor$(ab_get_slot)/etc/sensors/sns_reg_config" "$BASEDIR/hexagonrpc/sensors/sns_reg.conf"
+ # hexagonrpc expects socinfo packaged from downstream here, but because it is
+ # runtime-specific, the closest we have is socinfo from runtime kernel.
