@@ -15,7 +15,11 @@ makeinstall_target() {
 
   case "${DEVICE}" in
     "SM4450") cp -a SM4450/* ${INSTALL}/$(get_full_firmware_dir) ;;
-    "SM6115") cp -a SM6115/* ${INSTALL}/$(get_full_firmware_dir) ;;
+    "SM6115")
+      cp -a SM6115/* ${INSTALL}/$(get_full_firmware_dir)
+      # msm-firmware-loader provides these from the Android partitions
+      rm -r ${INSTALL}/$(get_full_firmware_dir)/qcom/sm6115/mangmi
+      ;;
     "SM8250") cp -a SM8250/* ${INSTALL}/$(get_full_firmware_dir) ;;
     "SM8550") cp -a SM8550/* ${INSTALL}/$(get_full_firmware_dir) ;;
     "SM8650") cp -a SM8650/* ${INSTALL}/$(get_full_firmware_dir) ;;
