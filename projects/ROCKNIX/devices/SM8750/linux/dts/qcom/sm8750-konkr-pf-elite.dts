@@ -1011,7 +1011,7 @@
 	spk_amp_2: speaker-amp@35 {
 		compatible = "awinic,aw88261";
 		reg = <0x35>;
-		firmware-name = "qcom/sm8750/konkr/pfe/aw88261_acf.bin";
+		firmware-name = "qcom/sm8750/konkr/pfe/aw882xx_acf.bin";
 		#sound-dai-cells = <1>;
 		awinic,audio-channel = <2>;	/* stock sound-channel = 2 */
 		awinic,sync-flag;
@@ -1034,11 +1034,7 @@
 };
 
 &gpu_zap_shader {
-	/* The SM8750 zap is signed with Qualcomm's generic SecTools test key,
-	 * not per-OEM: this board's blob and the shared qcom/sm8750 one have
-	 * byte-identical ELF and hash-table segments and the same signer, so
-	 * they differ only in signature bytes. Use the shared blob. */
-	firmware-name = "qcom/sm8750/gen80000_zap.mbn";
+	firmware-name = "qcom/sm8750/konkr/pfe/gen80000_zap.mbn";
 };
 
 /* ===================================================================== *
@@ -1567,11 +1563,8 @@
  * i2c8 0x34 NAKs — population unknown (quad layout may be partially stuffed).
  * All four stock positions are declared; the probe results decide the final
  * dai-link codec list. No reset gpio in stock (matches driver's optional one).
- * firmware-name points the driver at the device-namespaced cal blob instead
- * of its "aw88261_acf.bin" default, so the file does not sit in the firmware
- * root where any other AW88261 board would collide with it. Built into the
- * kernel via CONFIG_EXTRA_FIRMWARE (package.mk), same mechanism as the konkr
- * zap: no SYSTEM/rootfs dependency at probe time. */
+ * firmware-name points the driver at the stock cal blob, which
+ * msm-firmware-loader serves from the vendor partition. */
 &i2c15 {
 	clock-frequency = <400000>;
 	status = "okay";
@@ -1581,7 +1574,7 @@
 	spk_amp_3: speaker-amp@35 {
 		compatible = "awinic,aw88261";
 		reg = <0x35>;
-		firmware-name = "qcom/sm8750/konkr/pfe/aw88261_acf.bin";
+		firmware-name = "qcom/sm8750/konkr/pfe/aw882xx_acf.bin";
 		#sound-dai-cells = <1>;
 		awinic,audio-channel = <3>;	/* stock sound-channel = 3 */
 		awinic,sync-flag;
