@@ -1314,7 +1314,7 @@
 
 		zap-shader {
 			memory-region = <&gpu_microcode_mem>;
-			firmware-name = "qcom/sm4450/a613_zap.mbn";
+			firmware-name = "qcom/sm4450/RPClassic/gen6_3_26_0_zap.mbn";
 		};
 
 		gpu_opp_table: opp-table {
@@ -1745,7 +1745,7 @@
 			compatible = "awinic,aw88166";
 			reg = <0x34>;
 			#sound-dai-cells = <0>;
-			firmware-name = "qcom/sm4450/RPClassic/aw88166_acf.bin";
+			firmware-name = "qcom/sm4450/RPClassic/aw883xx_acf.bin";
 			sound-name-prefix = "Left";
 			awinic,audio-channel = <0>;
 			awinic,sync-flag;
@@ -1755,7 +1755,7 @@
 			compatible = "awinic,aw88166";
 			reg = <0x35>;
 			#sound-dai-cells = <0>;
-			firmware-name = "qcom/sm4450/RPClassic/aw88166_acf.bin";
+			firmware-name = "qcom/sm4450/RPClassic/aw883xx_acf.bin";
 			sound-name-prefix = "Right";
 			awinic,audio-channel = <0>;
 			awinic,sync-flag;
