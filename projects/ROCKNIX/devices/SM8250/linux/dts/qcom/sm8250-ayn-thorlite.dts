@@ -701,7 +701,7 @@
 
 &slpi {
 	status = "okay";
-	firmware-name = "qcom/sm8250/slpi.mbn";
+	firmware-name = "qcom/sm8250/Thundercomm/RB5/slpi.mbn";
 };
 
 &gmu {
