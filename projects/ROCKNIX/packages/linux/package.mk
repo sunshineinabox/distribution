@@ -80,14 +80,8 @@ done
 
 if [ "${DEVICE}" = "RK3326" -o "${DEVICE}" = "RK3566" ]; then
   PKG_DEPENDS_UNPACK+=" generic-dsi"
-elif [ "${DEVICE}" = "SM8250" -o "${DEVICE}" = "H700" -o "${DEVICE}" = "SM8650" -o "${DEVICE}" = "SM8750" ]; then
+elif [ "${DEVICE}" = "H700" ]; then
   PKG_DEPENDS_UNPACK+=" kernel-firmware"
-fi
-
-# SM8650/SM8750 build device-specific firmware blobs into the kernel, so the
-# extra-firmware package must be unpacked before the kernel is built.
-if [ "${DEVICE}" = "SM8650" -o "${DEVICE}" = "SM8750" ]; then
-  PKG_DEPENDS_UNPACK+=" extra-firmware"
 fi
 
 # A built-in cfg80211 needs regulatory.db inside the kernel image (see
@@ -205,21 +199,6 @@ pre_make_target() {
 
     ${PKG_BUILD}/scripts/config --set-str CONFIG_EXTRA_FIRMWARE "${FW_LIST}"
     ${PKG_BUILD}/scripts/config --set-str CONFIG_EXTRA_FIRMWARE_DIR "external-firmware"
-  elif [ "${TARGET_ARCH}" = "aarch64" -a "${DEVICE}" = "SM8250" ]; then
-    mkdir -p ${PKG_BUILD}/external-firmware/qcom/sm8250
-    mkdir -p ${PKG_BUILD}/external-firmware/qcom/vpu-1.0
-      cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/qcom/a650_gmu.bin ${PKG_BUILD}/external-firmware/qcom
-      cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/qcom/a650_sqe.fw ${PKG_BUILD}/external-firmware/qcom
-      cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/qcom/sm8250/a650_zap.mbn ${PKG_BUILD}/external-firmware/qcom/sm8250
-      cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/qcom/sm8250/adsp.mbn ${PKG_BUILD}/external-firmware/qcom/sm8250
-      cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/qcom/sm8250/cdsp.mbn ${PKG_BUILD}/external-firmware/qcom/sm8250
-      cp $(get_build_dir kernel-firmware)/.copied-firmware/qcom/sm8250/Thundercomm/RB5/* $(get_build_dir kernel-firmware)/.copied-firmware/qcom/sm8250/
-      cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/qcom/sm8250/slpi.mbn ${PKG_BUILD}/external-firmware/qcom/sm8250
-
-    FW_LIST="$(find ${PKG_BUILD}/external-firmware -type f | sed 's|.*external-firmware/||' | sort | xargs)"
-
-    ${PKG_BUILD}/scripts/config --set-str CONFIG_EXTRA_FIRMWARE "${FW_LIST}"
-    ${PKG_BUILD}/scripts/config --set-str CONFIG_EXTRA_FIRMWARE_DIR "external-firmware"
   elif [ "${TARGET_ARCH}" = "aarch64" -a "${DEVICE}" = "H700" ]; then
     mkdir -p ${PKG_BUILD}/external-firmware/rtl_bt
     mkdir -p ${PKG_BUILD}/external-firmware/rtw88
@@ -237,44 +216,6 @@ pre_make_target() {
       cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/panels/anbernic,rg40xx-panel.panel ${PKG_BUILD}/external-firmware/panels
       cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/panels/anbernic,rg40xx-v2-panel.panel ${PKG_BUILD}/external-firmware/panels
       cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/panels/anbernic,rgcubexx-panel.panel ${PKG_BUILD}/external-firmware/panels
-
-    FW_LIST="$(find ${PKG_BUILD}/external-firmware -type f | sed 's|.*external-firmware/||' | sort | xargs)"
-
-    ${PKG_BUILD}/scripts/config --set-str CONFIG_EXTRA_FIRMWARE "${FW_LIST}"
-    ${PKG_BUILD}/scripts/config --set-str CONFIG_EXTRA_FIRMWARE_DIR "external-firmware"
-  elif [ "${TARGET_ARCH}" = "aarch64" -a "${DEVICE}" = "SM8650" ]; then
-    mkdir -p ${PKG_BUILD}/external-firmware/qcom
-      cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/qcom/gen70900_aqe.fw ${PKG_BUILD}/external-firmware/qcom
-      cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/qcom/gen70900_sqe.fw ${PKG_BUILD}/external-firmware/qcom
-      cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/qcom/gmu_gen70900.bin ${PKG_BUILD}/external-firmware/qcom
-    mkdir -p ${PKG_BUILD}/external-firmware/qcom/sm8650/ayaneo/ps2
-      cp -Lv $(get_build_dir extra-firmware)/SM8650/qcom/sm8650/ayaneo/ps2/gen70900_zap.mbn ${PKG_BUILD}/external-firmware/qcom/sm8650/ayaneo/ps2
-
-    FW_LIST="$(find ${PKG_BUILD}/external-firmware -type f | sed 's|.*external-firmware/||' | sort | xargs)"
-
-    ${PKG_BUILD}/scripts/config --set-str CONFIG_EXTRA_FIRMWARE "${FW_LIST}"
-    ${PKG_BUILD}/scripts/config --set-str CONFIG_EXTRA_FIRMWARE_DIR "external-firmware"
-  elif [ "${TARGET_ARCH}" = "aarch64" -a "${DEVICE}" = "SM8750" ]; then
-    mkdir -p ${PKG_BUILD}/external-firmware/qcom
-      cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/qcom/gen80000_aqe.fw ${PKG_BUILD}/external-firmware/qcom
-      cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/qcom/gen80000_sqe.fw ${PKG_BUILD}/external-firmware/qcom
-      cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/qcom/gen80000_gmu.bin ${PKG_BUILD}/external-firmware/qcom
-
-    mkdir -p ${PKG_BUILD}/external-firmware/qcom/sm8750
-      cp -Lv $(get_build_dir kernel-firmware)/.copied-firmware/qcom/sm8750/gen80000_zap.mbn ${PKG_BUILD}/external-firmware/qcom/sm8750
-
-    # KONKR Pocket FIT Elite: AW88261 speaker-amp ACF (vendor cal/profile blob,
-    # extracted from the stock Android image). The aw88261 driver requests the
-    # blob; the amp nodes point at it with firmware-name. Built-in so the codec
-    # probe never depends on the rootfs firmware overlay.
-    mkdir -p ${PKG_BUILD}/external-firmware/qcom/sm8750/konkr/pfe
-      cp -Lv $(get_build_dir extra-firmware)/SM8750/qcom/sm8750/konkr/pfe/aw88261_acf.bin ${PKG_BUILD}/external-firmware/qcom/sm8750/konkr/pfe
-
-    # KONKR Pocket FIT Elite: QUAT-MI2S audio topology (the AYN tplg with its
-    # MI2S backend retargeted SECONDARY->QUATERNARY — the konkr's speaker amps
-    # are on QUATERNARY MI2S). Built-in firmware is searched before the rootfs,
-    # so this also overrides any stale copy in the SYSTEM overlay.
-      cp -Lv $(get_build_dir extra-firmware)/SM8750/qcom/sm8750/SM8750-KONKR-tplg.bin ${PKG_BUILD}/external-firmware/qcom/sm8750
 
     FW_LIST="$(find ${PKG_BUILD}/external-firmware -type f | sed 's|.*external-firmware/||' | sort | xargs)"
 
