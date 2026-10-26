@@ -11,19 +11,39 @@ PKG_LONGDESC="extra-firmware: Extra kernel firmware needed for ROCKNIX devices"
 PKG_TOOLCHAIN="manual"
 
 makeinstall_target() {
-  mkdir -p ${INSTALL}/$(get_full_firmware_dir)
+  local fw=${INSTALL}/$(get_full_firmware_dir)
+  mkdir -p ${fw}
 
+  # msm-firmware-loader provides the DSP, zap and amp blobs from the Android
+  # partitions
   case "${DEVICE}" in
-    "SM4450") cp -a SM4450/* ${INSTALL}/$(get_full_firmware_dir) ;;
-    "SM6115")
-      cp -a SM6115/* ${INSTALL}/$(get_full_firmware_dir)
-      # msm-firmware-loader provides these from the Android partitions
-      rm -r ${INSTALL}/$(get_full_firmware_dir)/qcom/sm6115/mangmi
+    "SM4450")
+      cp -a SM4450/* ${fw}
+      rm -r ${fw}/qcom/sm4450
       ;;
-    "SM8250") cp -a SM8250/* ${INSTALL}/$(get_full_firmware_dir) ;;
-    "SM8550") cp -a SM8550/* ${INSTALL}/$(get_full_firmware_dir) ;;
-    "SM8650") cp -a SM8650/* ${INSTALL}/$(get_full_firmware_dir) ;;
-    "SM8750") cp -a SM8750/* ${INSTALL}/$(get_full_firmware_dir) ;;
-    "RK3566") cp -a RK3566/* ${INSTALL}/$(get_full_firmware_dir) ;;
+    "SM6115")
+      cp -a SM6115/* ${fw}
+      rm -r ${fw}/qcom/sm6115/mangmi
+      ;;
+    "SM8250")
+      cp -a SM8250/* ${fw}
+      # unreferenced, the Thor Lite uses the generic ADSP
+      rm ${fw}/qcom/sm8250/ayn/thor/adsp.mbn
+      ;;
+    "SM8550")
+      cp -a SM8550/* ${fw}
+      rm -r ${fw}/qcom/sm8550/ayaneo
+      rm ${fw}/qcom/sm8550/ayn/*.mbn ${fw}/qcom/sm8550/ayn/*/*.mbn ${fw}/qcom/sm8550/ayn/*/*.jsn
+      ;;
+    "SM8650")
+      cp -a SM8650/* ${fw}
+      rm -r ${fw}/qcom/sm8650/ayaneo
+      ;;
+    "SM8750")
+      cp -a SM8750/* ${fw}
+      rm -r ${fw}/qcom/sm8750/konkr
+      rm ${fw}/qcom/sm8750/gen80000_zap.mbn ${fw}/qcom/sm8750/ayn/*/*.mbn ${fw}/qcom/sm8750/ayn/*/*.jsn
+      ;;
+    "RK3566") cp -a RK3566/* ${fw} ;;
   esac
 }
