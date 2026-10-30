@@ -1,0 +1,40 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Thu, 30 Oct 2026 20:30:00 +0000
+Subject: [PATCH] usb: typec: tcpci_mt6360: retry a deferred vbus supply
+
+The vbus supply is the charger's OTG boost, and the charger may wait for
+this port's power supply, so the supply can still be deferred at probe.
+Keep set_vbus on -EPROBE_DEFER and get the supply when the port first
+sources VBUS.
+---
+diff --git a/drivers/usb/typec/tcpm/tcpci_mt6360.c b/drivers/usb/typec/tcpm/tcpci_mt6360.c
+index b6b6cb4fb..18b48445b 100644
+--- a/drivers/usb/typec/tcpm/tcpci_mt6360.c
++++ b/drivers/usb/typec/tcpm/tcpci_mt6360.c
+@@ -149,6 +149,15 @@ static int mt6360_tcpc_set_vbus(struct tcpci *tcpci, struct tcpci_data *data,
+ 		container_of(data, struct mt6360_tcpc_info, tdata);
+ 	int ret;
+ 
++	if (IS_ERR(mti->vbus)) {
++		if (!source)
++			return 0;
++
++		mti->vbus = devm_regulator_get_optional(mti->dev, "vbus");
++		if (IS_ERR(mti->vbus))
++			return PTR_ERR(mti->vbus);
++	}
++
+ 	ret = regulator_is_enabled(mti->vbus);
+ 	if (ret < 0)
+ 		return ret;
+@@ -183,8 +192,9 @@ static int mt6360_tcpc_probe(struct platform_device *pdev)
+ 	if (mti->irq < 0)
+ 		return mti->irq;
+ 
++	/* The OTG boost may probe after this port, so retry in set_vbus */
+ 	mti->vbus = devm_regulator_get_optional(&pdev->dev, "vbus");
+-	if (!IS_ERR(mti->vbus))
++	if (!IS_ERR(mti->vbus) || PTR_ERR(mti->vbus) == -EPROBE_DEFER)
+ 		mti->tdata.set_vbus = mt6360_tcpc_set_vbus;
+ 
+ 	mti->tdata.init = mt6360_tcpc_init;

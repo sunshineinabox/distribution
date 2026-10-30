@@ -6,6 +6,7 @@
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/thermal/mediatek,lvts-thermal.h>
 #include <dt-bindings/thermal/thermal.h>
+#include <dt-bindings/usb/pd.h>
 
 #include "mt6785.dtsi"
 
@@ -1203,12 +1204,43 @@
 			#io-channel-cells = <1>;
 		};
 
+		/* PDOs and Rp as stock */
+		mt6360_tcpc: tcpc {
+			compatible = "mediatek,mt6360-tcpc";
+			interrupts-extended = <&pio 7 IRQ_TYPE_LEVEL_LOW>;
+			interrupt-names = "PD_IRQB";
+			vbus-supply = <&mt6360_otg_vbus>;
+
+			connector {
+				compatible = "usb-c-connector";
+				label = "USB-C";
+				data-role = "dual";
+				power-role = "dual";
+				try-power-role = "sink";
+				typec-power-opmode = "1.5A";
+				source-pdos = <PDO_FIXED(5000, 1500, PDO_FIXED_DUAL_ROLE |
+							 PDO_FIXED_DATA_SWAP | PDO_FIXED_USB_COMM)>;
+				sink-pdos = <PDO_FIXED(5000, 2600, PDO_FIXED_DUAL_ROLE |
+						       PDO_FIXED_DATA_SWAP | PDO_FIXED_USB_COMM)>;
+				op-sink-microwatt = <13000000>;
+
+				port {
+					typec_hs_ep: endpoint {
+						remote-endpoint = <&ssusb_hs_ep>;
+					};
+				};
+			};
+		};
+
 		/* stock charger settings */
 		charger {
 			compatible = "mediatek,mt6360-chg";
 			/* no Pump Express on mainline: 5 V adapters only */
 			richtek,vinovp-microvolt = <6500000>;
 			monitored-battery = <&battery>;
+			/* Type-C/PD current from TCPM; stock sinks 5 V 2.6 A */
+			power-supplies = <&mt6360_tcpc>;
+			mediatek,input-current-max-microamp = <2600000>;
 			io-channels = <&mt6360_adc 4>, <&mt6360_adc 6>;
 			io-channel-names = "vbat", "ibat";
 			mediatek,battery-thermal-zone = "battery-thermal";
@@ -1217,10 +1249,13 @@
 			mediatek,ircomp-resistor-micro-ohms = <25000>;
 			mediatek,ircomp-clamp-microvolt = <32000>;
 
-			usb-otg-vbus-regulator {
+			/* stock OTG boost voltage and current limit */
+			mt6360_otg_vbus: usb-otg-vbus-regulator {
 				regulator-name = "usb-otg-vbus";
-				regulator-min-microvolt = <4425000>;
-				regulator-max-microvolt = <5825000>;
+				regulator-min-microvolt = <5050000>;
+				regulator-max-microvolt = <5050000>;
+				regulator-min-microamp = <500000>;
+				regulator-max-microamp = <1800000>;
 			};
 		};
 
@@ -1450,10 +1485,22 @@
 	};
 };
 
-/* device-only until the MT6360 Type-C role switch is described */
+/* roles follow the MT6360 Type-C port; VBUS comes from the MT6360 boost */
 &ssusb {
 	vusb33-supply = <&mt6359_vusb>;
-	dr_mode = "peripheral";
+	dr_mode = "otg";
 	maximum-speed = "high-speed";
+	usb-role-switch;
+	role-switch-default-mode = "peripheral";
+	status = "okay";
+
+	port {
+		ssusb_hs_ep: endpoint {
+			remote-endpoint = <&typec_hs_ep>;
+		};
+	};
+};
+
+&xhci {
 	status = "okay";
 };
