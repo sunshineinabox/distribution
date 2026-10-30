@@ -1,0 +1,12 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 ROCKNIX (https://github.com/ROCKNIX)
+
+# No WiFi yet: start in USB network mode so the device is reachable over SSH.
+# Runs before the common 081-usbgadget and keeps any mode set since.
+CONF=/storage/.cache/usbgadget/usbgadget.conf
+
+if [ ! -s "${CONF}" ]; then
+  mkdir -p "$(dirname "${CONF}")"
+  echo "USB_MODE=cdc" >"${CONF}"
+fi
