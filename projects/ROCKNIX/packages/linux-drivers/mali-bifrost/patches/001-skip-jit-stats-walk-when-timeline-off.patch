@@ -1,0 +1,29 @@
+From 0d01abaa6f7a132fc6d9a4b2ce7ab9219c1e39a1 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Thu, 29 Oct 2026 20:10:52 -0700
+Subject: [PATCH] mali_kbase: skip the JIT stats walk when the timeline is off
+
+trace_jit_stats() takes jit_evict_lock and walks jit_active_head on every
+JIT allocation and free, but the totals are dropped unless the timeline
+stream is enabled. Return early when TLSTREAM_ENABLED is not set.
+---
+ product/kernel/drivers/gpu/arm/midgard/mali_kbase_mem.c | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/product/kernel/drivers/gpu/arm/midgard/mali_kbase_mem.c b/product/kernel/drivers/gpu/arm/midgard/mali_kbase_mem.c
+--- a/product/kernel/drivers/gpu/arm/midgard/mali_kbase_mem.c
++++ b/product/kernel/drivers/gpu/arm/midgard/mali_kbase_mem.c
+@@ -2954,6 +2954,10 @@ static void trace_jit_stats(struct kbase_context *kctx, u32 bin_id, u32 max_allo
+ 	u32 va_pages = 0;
+ 	u32 ph_pages = 0;
+ 
++	/* The totals only feed the timeline stream */
++	if (!((u32)atomic_read(&kbdev->timeline_flags) & TLSTREAM_ENABLED))
++		return;
++
+ 	mutex_lock(&kctx->jit_evict_lock);
+ 	list_for_each_entry(walker, &kctx->jit_active_head, jit_node) {
+ 		if (walker->jit_bin_id != bin_id)
+-- 
+2.55.0
+
