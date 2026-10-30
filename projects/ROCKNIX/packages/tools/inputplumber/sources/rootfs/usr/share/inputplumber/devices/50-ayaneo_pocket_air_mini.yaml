@@ -21,7 +21,7 @@ source_devices:
 
   - group: gamepad
     evdev:
-      name: adc-joystick
+      name: gamepad-joystick
       handler: event*
 
 target_devices:

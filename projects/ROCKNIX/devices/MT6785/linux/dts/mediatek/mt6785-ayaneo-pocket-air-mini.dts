@@ -93,6 +93,17 @@
 		pinctrl-0 = <&fan_pins>;
 	};
 
+	/* gamepad power, sequenced like the stock mtk-gamepad probe */
+	gamepad_pwr: regulator-gamepad-pwr {
+		compatible = "regulator-fixed";
+		regulator-name = "gamepad_pwr";
+		gpio = <&pio 15 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <100000>;
+		vin-supply = <&mt6360_vfp>;
+		regulator-always-on;
+	};
+
 	/* Start/Select codes as stock, D-pad as buttons */
 	gamepad-keys {
 		compatible = "gpio-keys";
@@ -190,8 +201,8 @@
 			gpios = <&pio 86 GPIO_ACTIVE_LOW>;
 		};
 
-		button-menu {
-			label = "menu";
+		button-extra {
+			label = "extra";
 			linux,code = <BTN_TRIGGER_HAPPY1>;
 			gpios = <&pio 87 GPIO_ACTIVE_LOW>;
 		};
@@ -209,7 +220,7 @@
 		};
 	};
 
-	/* GammaOS mtk-gamepad: sticks on AUXADC 1-4, hall triggers on the SGM58031 */
+	/* sticks on AUXADC 1-4, hall triggers on the SGM58031; Y axes and RT read inverted */
 	gamepad-joystick {
 		compatible = "adc-joystick";
 		io-channels = <&auxadc 1>, <&auxadc 2>, <&auxadc 3>, <&auxadc 4>,
@@ -221,48 +232,48 @@
 		axis@0 {
 			reg = <0>;
 			linux,code = <ABS_X>;
-			abs-range = <0 4095>;
-			abs-fuzz = <32>;
-			abs-flat = <64>;
+			abs-range = <1170 3270>;
+			abs-fuzz = <16>;
+			abs-flat = <80>;
 		};
 
 		axis@1 {
 			reg = <1>;
 			linux,code = <ABS_Y>;
-			abs-range = <0 4095>;
-			abs-fuzz = <32>;
-			abs-flat = <64>;
+			abs-range = <3070 1170>;
+			abs-fuzz = <16>;
+			abs-flat = <80>;
 		};
 
 		axis@2 {
 			reg = <2>;
 			linux,code = <ABS_RX>;
-			abs-range = <0 4095>;
-			abs-fuzz = <32>;
-			abs-flat = <64>;
+			abs-range = <1094 3294>;
+			abs-fuzz = <16>;
+			abs-flat = <80>;
 		};
 
 		axis@3 {
 			reg = <3>;
 			linux,code = <ABS_RY>;
-			abs-range = <0 4095>;
-			abs-fuzz = <32>;
-			abs-flat = <64>;
+			abs-range = <3125 1145>;
+			abs-fuzz = <16>;
+			abs-flat = <80>;
 		};
 
 		axis@4 {
 			reg = <4>;
 			linux,code = <ABS_Z>;
-			abs-range = <8000 25000>;
-			abs-fuzz = <64>;
+			abs-range = <13700 16500>;
+			abs-fuzz = <32>;
 			abs-flat = <0>;
 		};
 
 		axis@5 {
 			reg = <5>;
 			linux,code = <ABS_RZ>;
-			abs-range = <8000 25000>;
-			abs-fuzz = <64>;
+			abs-range = <12550 10600>;
+			abs-fuzz = <32>;
 			abs-flat = <0>;
 		};
 	};
@@ -1087,10 +1098,17 @@
 			mediatek,poweroff-sequence;
 
 			/*
-			 * SD rails only. buck2/ldo6/ldo7 feed DRAM and ldo1/ldo2 the
-			 * pad/touch: left undescribed so the kernel cannot touch them.
-			 * Capped at the 3.0 V GammaOS uses; no UHS, so VMC never goes to 1.8 V.
+			 * buck2/ldo6/ldo7 feed DRAM and ldo2 the touch panel: left
+			 * undescribed so the kernel cannot touch them. VMC is capped at
+			 * the 3.0 V GammaOS uses; no UHS, so it never goes to 1.8 V.
 			 */
+			/* VFP: the gamepad's vcc3v3, mtk-gamepad sets 3.3 V */
+			mt6360_vfp: ldo1 {
+				regulator-name = "vfp";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+			};
+
 			mt6360_vmc: ldo3 {
 				regulator-name = "vmc";
 				regulator-min-microvolt = <1800000>;
@@ -1146,16 +1164,18 @@
 	status = "okay";
 };
 
+/* the SGM58031 does not answer at 400 kHz on mainline timings */
 &i2c6 {
-	clock-frequency = <400000>;
+	clock-frequency = <100000>;
 	pinctrl-names = "default";
 	pinctrl-0 = <&i2c6_pins>;
 	status = "okay";
 
-	/* SGM58031, register compatible with the ADS1115; GammaOS reads AIN0/AIN1 at 4.096 V, 860 SPS */
+	/* SGM58031 (ADS1115 clone): AIN0 is LT, AIN1 is RT, 4.096 V range */
 	trigger_adc: adc@48 {
-		compatible = "ti,ads1115";
+		compatible = "sgmicro,sgm58031", "ti,ads1115";
 		reg = <0x48>;
+		vdd-supply = <&gamepad_pwr>;
 		#address-cells = <1>;
 		#size-cells = <0>;
 		#io-channel-cells = <1>;
@@ -1175,20 +1195,10 @@
 };
 
 &pio {
-	/* GammaOS mtk-gamepad drives this high to power the SGM58031 */
-	gamepad-en-hog {
-		gpio-hog;
-		gpios = <15 GPIO_ACTIVE_HIGH>;
-		output-high;
-		line-name = "gamepad-en";
-	};
-
 	/* stock pulls */
 	gamepad_key_pins: gamepad-key-pins {
 		pins-keys {
-			pinmux = <PINMUX_GPIO57__FUNC_GPIO57>,
-				 <PINMUX_GPIO58__FUNC_GPIO58>,
-				 <PINMUX_GPIO78__FUNC_GPIO78>,
+			pinmux = <PINMUX_GPIO78__FUNC_GPIO78>,
 				 <PINMUX_GPIO79__FUNC_GPIO79>,
 				 <PINMUX_GPIO80__FUNC_GPIO80>,
 				 <PINMUX_GPIO81__FUNC_GPIO81>,
@@ -1206,6 +1216,13 @@
 				 <PINMUX_GPIO94__FUNC_GPIO94>;
 			input-enable;
 			bias-pull-up;
+		};
+
+		pins-keys-pupd {
+			pinmux = <PINMUX_GPIO57__FUNC_GPIO57>,
+				 <PINMUX_GPIO58__FUNC_GPIO58>;
+			input-enable;
+			bias-pull-up = <MTK_PUPD_SET_R1R0_01>;
 		};
 	};
 
