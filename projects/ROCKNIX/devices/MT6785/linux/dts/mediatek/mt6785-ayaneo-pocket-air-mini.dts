@@ -2,6 +2,7 @@
 /dts-v1/;
 
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/iio/adc/mediatek,mt6359-auxadc.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/thermal/mediatek,lvts-thermal.h>
 #include <dt-bindings/thermal/thermal.h>
@@ -91,6 +92,72 @@
 		cooling-levels = <0 77 128 191 255>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&fan_pins>;
+	};
+
+	/* stock bat_gm30 and charger values, OCV from the 25 C profile */
+	battery: battery {
+		compatible = "simple-battery";
+		device-chemistry = "lithium-ion";
+		charge-full-design-microamp-hours = <4600000>;
+		voltage-min-design-microvolt = <3400000>;
+		voltage-max-design-microvolt = <4350000>;
+		constant-charge-current-max-microamp = <2500000>;
+		constant-charge-voltage-max-microvolt = <4350000>;
+		charge-term-current-microamp = <150000>;
+		precharge-current-microamp = <150000>;
+		factory-internal-resistance-micro-ohms = <144000>;
+		operating-range-celsius = <0 55>;
+		ocv-capacity-celsius = <25>;
+		ocv-capacity-table-0 = <4344900 100>,
+				       <4257571 95>,
+				       <4201313 90>,
+				       <4147029 85>,
+				       <4093285 80>,
+				       <4048625 75>,
+				       <3981883 70>,
+				       <3939884 65>,
+				       <3906996 60>,
+				       <3866678 55>,
+				       <3835200 50>,
+				       <3811263 45>,
+				       <3791581 40>,
+				       <3775185 35>,
+				       <3762021 30>,
+				       <3749925 25>,
+				       <3733298 20>,
+				       <3709250 15>,
+				       <3678882 10>,
+				       <3656914 5>,
+				       <3433700 0>;
+	};
+
+	/* 10k NTC with a 24k pull-up to VBIF28, AUXADC value in mV * 4096 */
+	battery_ntc: thermal-sensor-battery {
+		compatible = "generic-adc-thermal";
+		#thermal-sensor-cells = <0>;
+		io-channels = <&mt6359_auxadc MT6359_AUXADC_BAT_TEMP>;
+		io-channel-names = "sensor-channel";
+		temperature-lookup-table = <(-40000) 10215676>,
+					   <(-35000) 9870092>,
+					   <(-30000) 9464743>,
+					   <(-25000) 9001485>,
+					   <(-20000) 8484627>,
+					   <(-15000) 7924032>,
+					   <(-10000) 7330058>,
+					   <(-5000) 6714236>,
+					   <0 6094794>,
+					   <5000 5487809>,
+					   <10000 4903633>,
+					   <15000 4351584>,
+					   <20000 3840098>,
+					   <25000 3373176>,
+					   <30000 2951047>,
+					   <35000 2574810>,
+					   <40000 2242709>,
+					   <45000 1950136>,
+					   <50000 1694602>,
+					   <55000 1472388>,
+					   <60000 1279594>;
 	};
 
 	/* gamepad power, sequenced like the stock mtk-gamepad probe */
@@ -284,6 +351,12 @@
 	 * GPU from 55 C and is at full speed before either throttles.
 	 */
 	thermal-zones {
+		battery-thermal {
+			polling-delay-passive = <0>;
+			polling-delay = <5000>;
+			thermal-sensors = <&battery_ntc>;
+		};
+
 		cpu-big0-thermal {
 			polling-delay-passive = <100>;
 			polling-delay = <1000>;
@@ -747,6 +820,19 @@
 				regulator-max-microvolt = <1800000>;
 				regulator-always-on;
 			};
+
+			/* battery NTC pull-up */
+			mt6359_vbif28: ldo_vbif28 {
+				regulator-name = "vbif28";
+				regulator-min-microvolt = <2800000>;
+				regulator-max-microvolt = <2800000>;
+				regulator-always-on;
+			};
+		};
+
+		mt6359_auxadc: adc {
+			compatible = "mediatek,mt6359-auxadc";
+			#io-channel-cells = <1>;
 		};
 
 		keys {
@@ -1111,6 +1197,32 @@
 		interrupt-names = "IRQB";
 		interrupt-controller;
 		#interrupt-cells = <1>;
+
+		mt6360_adc: adc {
+			compatible = "mediatek,mt6360-adc";
+			#io-channel-cells = <1>;
+		};
+
+		/* stock charger settings */
+		charger {
+			compatible = "mediatek,mt6360-chg";
+			/* no Pump Express on mainline: 5 V adapters only */
+			richtek,vinovp-microvolt = <6500000>;
+			monitored-battery = <&battery>;
+			io-channels = <&mt6360_adc 4>, <&mt6360_adc 6>;
+			io-channel-names = "vbat", "ibat";
+			mediatek,battery-thermal-zone = "battery-thermal";
+			mediatek,input-voltage-limit-microvolt = <4400000>;
+			mediatek,safety-timer-hours = <12>;
+			mediatek,ircomp-resistor-micro-ohms = <25000>;
+			mediatek,ircomp-clamp-microvolt = <32000>;
+
+			usb-otg-vbus-regulator {
+				regulator-name = "usb-otg-vbus";
+				regulator-min-microvolt = <4425000>;
+				regulator-max-microvolt = <5825000>;
+			};
+		};
 
 		regulator {
 			compatible = "mediatek,mt6360-regulator";
