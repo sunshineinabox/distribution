@@ -1187,6 +1187,22 @@
 	};
 };
 
+&i2c1 {
+	clock-frequency = <400000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c1_pins>;
+	status = "okay";
+
+	/* polled, mount-matrix from the stock direction 5 */
+	accelerometer@4c {
+		compatible = "mcube,mc3416";
+		reg = <0x4c>;
+		mount-matrix = "0", "1", "0",
+			       "1", "0", "0",
+			       "0", "0", "-1";
+	};
+};
+
 /* pins already muxed by LK, which drives the MT6360 itself */
 &i2c5 {
 	clock-frequency = <400000>;
@@ -1434,6 +1450,14 @@
 		pins-bus {
 			pinmux = <PINMUX_GPIO51__FUNC_SCL0>,
 				 <PINMUX_GPIO52__FUNC_SDA0>;
+			bias-pull-up;
+		};
+	};
+
+	i2c1_pins: i2c1-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO61__FUNC_SCL1>,
+				 <PINMUX_GPIO62__FUNC_SDA1>;
 			bias-pull-up;
 		};
 	};
