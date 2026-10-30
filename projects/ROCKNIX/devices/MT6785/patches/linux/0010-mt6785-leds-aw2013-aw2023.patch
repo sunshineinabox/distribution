@@ -1,0 +1,264 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Thu, 30 Oct 2026 20:45:00 +0000
+Subject: [PATCH] leds: aw2013: add AW2023 support
+
+The AW2023 uses the AW2013 register layout apart from its current and
+blink timing settings, and needs 2 ms after CHIPEN before other writes
+take effect. Add it as awinic,aw2023.
+---
+diff --git a/Documentation/devicetree/bindings/leds/leds-aw2013.yaml b/Documentation/devicetree/bindings/leds/leds-aw2013.yaml
+index 26238446f..a2adc4b8e 100644
+--- a/Documentation/devicetree/bindings/leds/leds-aw2013.yaml
++++ b/Documentation/devicetree/bindings/leds/leds-aw2013.yaml
+@@ -15,7 +15,9 @@ description: |
+ 
+ properties:
+   compatible:
+-    const: awinic,aw2013
++    enum:
++      - awinic,aw2013
++      - awinic,aw2023
+ 
+   reg:
+     maxItems: 1
+diff --git a/drivers/leds/leds-aw2013.c b/drivers/leds/leds-aw2013.c
+index 216755d60..651d0ad50 100644
+--- a/drivers/leds/leds-aw2013.c
++++ b/drivers/leds/leds-aw2013.c
+@@ -1,6 +1,7 @@
+ // SPDX-License-Identifier: GPL-2.0+
+-// Driver for Awinic AW2013 3-channel LED driver
++// Driver for Awinic AW2013 and AW2023 3-channel LED drivers
+ 
++#include <linux/delay.h>
+ #include <linux/i2c.h>
+ #include <linux/leds.h>
+ #include <linux/module.h>
+@@ -15,11 +16,16 @@
+ #define AW2013_RSTR 0x00
+ #define AW2013_RSTR_RESET 0x55
+ #define AW2013_RSTR_CHIP_ID 0x33
++#define AW2023_RSTR_CHIP_ID 0x09
+ 
+ /* Global control register */
+ #define AW2013_GCR 0x01
+ #define AW2013_GCR_ENABLE BIT(0)
+ 
++/* AW2023 global maximum current register */
++#define AW2023_GCR2 0x04
++#define AW2023_GCR2_IMAX_MASK GENMASK(1, 0)
++
+ /* LED channel enable register */
+ #define AW2013_LCTR 0x30
+ #define AW2013_LCTR_LE(x) BIT((x))
+@@ -27,6 +33,7 @@
+ /* LED channel control registers */
+ #define AW2013_LCFG(x) (0x31 + (x))
+ #define AW2013_LCFG_IMAX_MASK (BIT(0) | BIT(1)) // Should be 0-3
++#define AW2023_LCFG_CUR_MASK GENMASK(3, 0) // Io = Imax * CUR / 15
+ #define AW2013_LCFG_MD BIT(4)
+ #define AW2013_LCFG_FI BIT(5)
+ #define AW2013_LCFG_FO BIT(6)
+@@ -51,6 +58,20 @@
+ 
+ #define AW2013_TIME_STEP 130 /* ms */
+ 
++enum aw2013_model {
++	AW2013,
++	AW2023,
++};
++
++/* AW2023 GCR2.IMAX settings, indexed by register value */
++static const unsigned int aw2023_imax_ua[] = { 15000, 30000, 5000, 10000 };
++
++/* AW2023 T2 (on) and T4 (off) times, indexed by register value */
++static const unsigned int aw2023_times_ms[] = {
++	40, 130, 260, 380, 510, 770, 1040, 1600,
++	2100, 2600, 3100, 4200, 5200, 6200, 7300, 8300,
++};
++
+ struct aw2013;
+ 
+ struct aw2013_led {
+@@ -58,6 +79,7 @@ struct aw2013_led {
+ 	struct led_classdev cdev;
+ 	u32 num;
+ 	unsigned int imax;
++	unsigned int max_ua;
+ };
+ 
+ struct aw2013 {
+@@ -66,6 +88,8 @@ struct aw2013 {
+ 	struct i2c_client *client;
+ 	struct aw2013_led leds[AW2013_MAX_LEDS];
+ 	struct regmap *regmap;
++	enum aw2013_model model;
++	unsigned int aw2023_imax;
+ 	int num_leds;
+ 	bool enabled;
+ };
+@@ -81,9 +105,24 @@ static int aw2013_chip_init(struct aw2013 *chip)
+ 		return ret;
+ 	}
+ 
++	if (chip->model == AW2023) {
++		/* other registers are ignored until the oscillator runs */
++		usleep_range(2000, 3000);
++
++		ret = regmap_update_bits(chip->regmap, AW2023_GCR2,
++					 AW2023_GCR2_IMAX_MASK, chip->aw2023_imax);
++		if (ret) {
++			dev_err(&chip->client->dev,
++				"Failed to set maximum current: %d\n", ret);
++			return ret;
++		}
++	}
++
+ 	for (i = 0; i < chip->num_leds; i++) {
+ 		ret = regmap_update_bits(chip->regmap,
+ 					 AW2013_LCFG(chip->leds[i].num),
++					 chip->model == AW2023 ?
++					 AW2023_LCFG_CUR_MASK :
+ 					 AW2013_LCFG_IMAX_MASK,
+ 					 chip->leds[i].imax);
+ 		if (ret) {
+@@ -194,6 +233,17 @@ static int aw2013_brightness_set(struct led_classdev *cdev,
+ 	return ret;
+ }
+ 
++static unsigned int aw2023_time_sel(unsigned long ms)
++{
++	unsigned int i;
++
++	for (i = 0; i < ARRAY_SIZE(aw2023_times_ms) - 1; i++)
++		if (aw2023_times_ms[i] >= ms)
++			break;
++
++	return i;
++}
++
+ static int aw2013_blink_set(struct led_classdev *cdev,
+ 			    unsigned long *delay_on, unsigned long *delay_off)
+ {
+@@ -230,11 +280,19 @@ static int aw2013_blink_set(struct led_classdev *cdev,
+ 	}
+ 
+ 	/* Convert into values the HW will understand. */
+-	off = min(5, ilog2((*delay_off - 1) / AW2013_TIME_STEP) + 1);
+-	on = min(7, ilog2((*delay_on - 1) / AW2013_TIME_STEP) + 1);
++	if (led->chip->model == AW2023) {
++		on = aw2023_time_sel(*delay_on);
++		off = aw2023_time_sel(*delay_off);
+ 
+-	*delay_off = BIT(off) * AW2013_TIME_STEP;
+-	*delay_on = BIT(on) * AW2013_TIME_STEP;
++		*delay_on = aw2023_times_ms[on];
++		*delay_off = aw2023_times_ms[off];
++	} else {
++		off = min(5, ilog2((*delay_off - 1) / AW2013_TIME_STEP) + 1);
++		on = min(7, ilog2((*delay_on - 1) / AW2013_TIME_STEP) + 1);
++
++		*delay_off = BIT(off) * AW2013_TIME_STEP;
++		*delay_on = BIT(on) * AW2013_TIME_STEP;
++	}
+ 
+ 	/* Set timings */
+ 	ret = regmap_write(led->chip->regmap,
+@@ -254,6 +312,12 @@ static int aw2013_blink_set(struct led_classdev *cdev,
+ 
+ 	ret = regmap_update_bits(led->chip->regmap, AW2013_LCTR,
+ 				 AW2013_LCTR_LE(num), 0xFF);
++	if (ret)
++		goto out;
++
++	/* AW2023 starts the pattern on this write (T0 = 0, repeat forever) */
++	if (led->chip->model == AW2023)
++		ret = regmap_write(led->chip->regmap, AW2013_LEDT2(num), 0);
+ 
+ out:
+ 	mutex_unlock(&led->chip->mutex);
+@@ -261,6 +325,26 @@ static int aw2013_blink_set(struct led_classdev *cdev,
+ 	return ret;
+ }
+ 
++/* Smallest IMAX range covering every LED, then the largest CUR under each limit */
++static void aw2023_set_currents(struct aw2013 *chip)
++{
++	unsigned int ua = 0, sel, best = 1; /* 30 mA */
++	int i;
++
++	for (i = 0; i < chip->num_leds; i++)
++		ua = max(ua, chip->leds[i].max_ua);
++
++	for (sel = 0; sel < ARRAY_SIZE(aw2023_imax_ua); sel++)
++		if (aw2023_imax_ua[sel] >= ua &&
++		    aw2023_imax_ua[sel] < aw2023_imax_ua[best])
++			best = sel;
++
++	chip->aw2023_imax = best;
++	for (i = 0; i < chip->num_leds; i++)
++		chip->leds[i].imax = clamp(chip->leds[i].max_ua * 15 /
++					   aw2023_imax_ua[best], 1U, 15U);
++}
++
+ static int aw2013_probe_dt(struct aw2013 *chip)
+ {
+ 	struct device_node *np = dev_of_node(&chip->client->dev);
+@@ -294,10 +378,12 @@ static int aw2013_probe_dt(struct aw2013 *chip)
+ 		if (!of_property_read_u32(child, "led-max-microamp", &imax)) {
+ 			led->imax = min_t(u32, imax / 5000, 3);
+ 		} else {
++			imax = 5000;
+ 			led->imax = 1; // 5mA
+ 			dev_info(&chip->client->dev,
+ 				 "DT property led-max-microamp is missing\n");
+ 		}
++		led->max_ua = imax;
+ 
+ 		led->cdev.brightness_set_blocking = aw2013_brightness_set;
+ 		led->cdev.blink_set = aw2013_blink_set;
+@@ -315,6 +401,9 @@ static int aw2013_probe_dt(struct aw2013 *chip)
+ 
+ 	chip->num_leds = i;
+ 
++	if (chip->model == AW2023)
++		aw2023_set_currents(chip);
++
+ 	return 0;
+ }
+ 
+@@ -346,6 +435,7 @@ static int aw2013_probe(struct i2c_client *client)
+ 	mutex_lock(&chip->mutex);
+ 
+ 	chip->client = client;
++	chip->model = (enum aw2013_model)(uintptr_t)device_get_match_data(&client->dev);
+ 	i2c_set_clientdata(client, chip);
+ 
+ 	chip->regmap = devm_regmap_init_i2c(client, &aw2013_regmap_config);
+@@ -383,7 +473,8 @@ static int aw2013_probe(struct i2c_client *client)
+ 		goto error_reg;
+ 	}
+ 
+-	if (chipid != AW2013_RSTR_CHIP_ID) {
++	if (chipid != (chip->model == AW2023 ? AW2023_RSTR_CHIP_ID :
++					       AW2013_RSTR_CHIP_ID)) {
+ 		dev_err(&client->dev, "Chip reported wrong ID: %x\n",
+ 			chipid);
+ 		ret = -ENODEV;
+@@ -420,7 +511,8 @@ static int aw2013_probe(struct i2c_client *client)
+ }
+ 
+ static const struct of_device_id aw2013_match_table[] = {
+-	{ .compatible = "awinic,aw2013", },
++	{ .compatible = "awinic,aw2013", .data = (void *)AW2013 },
++	{ .compatible = "awinic,aw2023", .data = (void *)AW2023 },
+ 	{ /* sentinel */ },
+ };
+ 
+@@ -437,5 +529,5 @@ static struct i2c_driver aw2013_driver = {
+ module_i2c_driver(aw2013_driver);
+ 
+ MODULE_AUTHOR("Nikita Travkin <nikitos.tr@gmail.com>");
+-MODULE_DESCRIPTION("AW2013 LED driver");
++MODULE_DESCRIPTION("AW2013/AW2023 LED driver");
+ MODULE_LICENSE("GPL v2");
