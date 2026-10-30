@@ -11,6 +11,12 @@
 	compatible = "ayaneo,pocket-air-mini", "mediatek,mt6785";
 	chassis-type = "handset";
 
+	/* eMMC probe waits for vemc, so pin the numbering */
+	aliases {
+		mmc0 = &mmc0;
+		mmc1 = &mmc1;
+	};
+
 	chosen {
 		#address-cells = <2>;
 		#size-cells = <2>;
@@ -44,26 +50,13 @@
 	scp {
 		compatible = "mediatek,scp";
 	};
-
-	/*
-	 * Description only (no GPIO/enable): MT6359 VEMC, which LK leaves on.
-	 * Replace with the real PMIC regulator once MT6359 is described.
-	 */
-	emmc_vcc: regulator-emmc-vcc {
-		compatible = "regulator-fixed";
-		regulator-name = "emmc_vcc";
-		regulator-min-microvolt = <3000000>;
-		regulator-max-microvolt = <3000000>;
-		regulator-always-on;
-		regulator-boot-on;
-	};
 };
 
 /*
- * MT6359 for its keys only: no regulator/rtc/codec/adc node, so no rail is
- * described. Leave power-off-time-sec / long-press-mode out: mainline's
- * MT6359_TOP_RST_MISC (0x14c) is the vendor's TOP_RST_MISC_SET, so the default
- * all-zero update is a no-op and the long-press reset stays as LK set it.
+ * No rtc/codec/adc node. Leave power-off-time-sec / long-press-mode out:
+ * mainline's MT6359_TOP_RST_MISC (0x14c) is the vendor's TOP_RST_MISC_SET, so
+ * the default all-zero update is a no-op and the long-press reset stays as LK
+ * set it.
  */
 &pwrap {
 	pmic {
@@ -75,6 +68,34 @@
 		/* RTC BBPU + PWRHOLD power-off (patches/0001) */
 		power-controller {
 			compatible = "mediatek,mt6359-pwrc";
+		};
+
+		/*
+		 * Only rails with a consumer, pinned to what GammaOS runs and never
+		 * switched off. Everything else (vproc*, vsram*, vcore, vgpu11,
+		 * vmodem, ...) stays undescribed so the kernel cannot touch it.
+		 */
+		regulators {
+			mt6359_vemc: ldo_vemc {
+				regulator-name = "vemc";
+				regulator-min-microvolt = <3000000>;
+				regulator-max-microvolt = <3000000>;
+				regulator-always-on;
+			};
+
+			mt6359_vusb: ldo_vusb {
+				regulator-name = "vusb";
+				regulator-min-microvolt = <3000000>;
+				regulator-max-microvolt = <3000000>;
+				regulator-always-on;
+			};
+
+			mt6359_vio18: ldo_vio18 {
+				regulator-name = "vio18";
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+				regulator-always-on;
+			};
 		};
 
 		keys {
@@ -152,7 +173,7 @@
 	non-removable;
 	no-sd;
 	no-sdio;
-	vmmc-supply = <&emmc_vcc>;
+	vmmc-supply = <&mt6359_vemc>;
 
 	pinctrl-names = "default", "state_uhs";
 	pinctrl-0 = <&mmc0_pins>;
@@ -230,8 +251,9 @@
 	};
 };
 
-/* device-only until the MT6360 Type-C role switch is described; VUSB is left on by LK */
+/* device-only until the MT6360 Type-C role switch is described */
 &ssusb {
+	vusb33-supply = <&mt6359_vusb>;
 	dr_mode = "peripheral";
 	maximum-speed = "high-speed";
 	status = "okay";
