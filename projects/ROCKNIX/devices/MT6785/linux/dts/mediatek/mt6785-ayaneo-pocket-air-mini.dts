@@ -63,8 +63,8 @@
 	};
 
 	/*
-	 * GammaOS: 85 C throttles the CPUs, 117 C resets. GPU/VPU only get the
-	 * critical trip until the GPU has a cooling device.
+	 * GammaOS: 85 C throttles the CPUs and the GPU, 117 C resets. The VPU
+	 * only gets the critical trip.
 	 */
 	thermal-zones {
 		cpu-big0-thermal {
@@ -225,10 +225,23 @@
 			thermal-sensors = <&lvts MT6785_GPU0>;
 
 			trips {
+				gpu0_alert: trip-alert {
+					temperature = <85000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
 				trip-crit {
 					temperature = <117000>;
 					hysteresis = <0>;
 					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&gpu0_alert>;
+					cooling-device = <&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
 				};
 			};
 		};
@@ -239,10 +252,23 @@
 			thermal-sensors = <&lvts MT6785_GPU1>;
 
 			trips {
+				gpu1_alert: trip-alert {
+					temperature = <85000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
 				trip-crit {
 					temperature = <117000>;
 					hysteresis = <0>;
 					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&gpu1_alert>;
+					cooling-device = <&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
 				};
 			};
 		};
@@ -335,11 +361,7 @@
 			compatible = "mediatek,mt6359-pwrc";
 		};
 
-		/*
-		 * Only rails with a consumer, never switched off. Everything else
-		 * (vcore, vgpu11, vsram_others, vmodem, ...) stays undescribed so
-		 * the kernel cannot touch it.
-		 */
+		/* only rails with a consumer, the rest stay undescribed so the kernel leaves them alone */
 		regulators {
 			/* CPU rails span the mt6785.dtsi OPPs, vsram tracks vproc + 100 mV as stock */
 			mt6359_vproc1: buck_vproc1 {
@@ -364,6 +386,32 @@
 				regulator-max-microvolt = <1118750>;
 				regulator-ramp-delay = <7500>;
 				regulator-always-on;
+			};
+
+			/*
+			 * GPU rails as GammaOS uses them (vgpu11 + vpu as vsram_gpu),
+			 * spanning the mt6785.dtsi OPPs = the vendor sign-off table.
+			 * The MediaTek coupler keeps vsram = max(850 mV, vgpu + 100 mV)
+			 * like the vendor gpufreq; both may go off with the MFG domains.
+			 */
+			mt6359_vgpu11: buck_vgpu11 {
+				regulator-name = "vgpu";
+				regulator-min-microvolt = <612500>;
+				regulator-max-microvolt = <850000>;
+				regulator-ramp-delay = <5000>;
+				regulator-enable-ramp-delay = <200>;
+				regulator-coupled-with = <&mt6359_vpu>;
+				regulator-coupled-max-spread = <100000>;
+			};
+
+			mt6359_vpu: buck_vpu {
+				regulator-name = "vsram_gpu";
+				regulator-min-microvolt = <850000>;
+				regulator-max-microvolt = <950000>;
+				regulator-ramp-delay = <5000>;
+				regulator-enable-ramp-delay = <200>;
+				regulator-coupled-with = <&mt6359_vgpu11>;
+				regulator-coupled-max-spread = <100000>;
 			};
 
 			mt6359_vsram_proc2: ldo_vsram_proc2 {
@@ -413,9 +461,9 @@
 
 /*
  * scpsys powers every domain on at probe and fails as a whole if one does not
- * come up. MD has no modem rails here (power-on times out) and MFG needs the GPU
- * rails described first; audio and connectivity have no users yet. MM and its
- * CAM/ISP/VDEC/VENC subdomains stay: the M4U waits for all of their larbs.
+ * come up. MD has no modem rails here (power-on times out); audio and
+ * connectivity have no users yet. MM and its CAM/ISP/VDEC/VENC subdomains
+ * stay: the M4U waits for all of their larbs.
  */
 &{/soc/syscon@10006000/power-controller/power-domain@0} {
 	status = "disabled";
@@ -430,7 +478,12 @@
 };
 
 &mfg_async {
-	status = "disabled";
+	domain-supply = <&mt6359_vgpu11>;
+};
+
+/* MFG holds the GPU SRAM */
+&mfg {
+	domain-supply = <&mt6359_vpu>;
 };
 
 /* OVL0 .. DITHER0 -> DSI0 as LK sets it up, panel supplies stay as LK left them */
@@ -652,6 +705,11 @@
 };
 
 &pwm1 {
+	status = "okay";
+};
+
+&gpu {
+	mali-supply = <&mt6359_vgpu11>;
 	status = "okay";
 };
 
