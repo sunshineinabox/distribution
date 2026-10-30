@@ -192,6 +192,243 @@
 	};
 };
 
+/*
+ * scpsys powers every domain on at probe and fails as a whole if one does not
+ * come up. MD has no modem rails here (power-on times out) and MFG needs the GPU
+ * rails described first; audio and connectivity have no users yet. MM and its
+ * CAM/ISP/VDEC/VENC subdomains stay: the M4U waits for all of their larbs.
+ */
+&{/soc/syscon@10006000/power-controller/power-domain@0} {
+	status = "disabled";
+};
+
+&{/soc/syscon@10006000/power-controller/power-domain@2} {
+	status = "disabled";
+};
+
+&{/soc/syscon@10006000/power-controller/power-domain@4} {
+	status = "disabled";
+};
+
+&mfg_async {
+	status = "disabled";
+};
+
+/* OVL0 .. DITHER0 -> DSI0 as LK sets it up, panel supplies stay as LK left them */
+&dither0_out {
+	remote-endpoint = <&dsi0_in>;
+};
+
+&dsi0 {
+	status = "okay";
+
+	/*
+	 * Stock st7703_hd720_lcm_drv: reset GPIO44, 1280x960 sync-pulse video at
+	 * the stock 532 Mbps per lane (62.5 Hz). The clock lane must drop to LP
+	 * between lines (LK's HSTX_CKLP_EN): with a continuous clock the panel
+	 * shows only vertical lines. The I lines are the stock lk_a table byte
+	 * for byte (VGH/VGL 0x58, CPUMP 0x32, AVDD 0xE0, AVEE 0x20); the source
+	 * LK's default over-drives these. Commands >= 0xB0 go out as generic
+	 * writes (gen=), the rest as DCS, as MTK's DSI_set_cmdq_V2 does. Waits
+	 * are hex ms.
+	 */
+	panel@0 {
+		compatible = "rocknix,generic-dsi";
+		reg = <0>;
+		reset-gpios = <&pio 44 GPIO_ACTIVE_LOW>;
+
+		panel_description =
+			"G size=85,64 delays=10,10,120,20,0 format=rgb888 lanes=4 flags=0xc05",
+			"M clock=88667 horizontal=1280,60,30,60 vertical=960,16,8,8 default=1",
+			"I gen=ee01",
+			"I gen=ea07",
+			"I gen=eb12",
+			"I dcs=05 data=19",
+			"I dcs=0a data=86",
+			"I dcs=14 data=58",
+			"I dcs=15 data=58",
+			"I dcs=17 data=32",
+			"I dcs=28 data=1f",
+			"I dcs=29 data=29",
+			"I dcs=2a data=63",
+			"I dcs=2f data=f3",
+			"I gen=ee02",
+			"I dcs=39 data=70",
+			"I dcs=00 data=00",
+			"I dcs=01 data=0d",
+			"I dcs=02 data=14",
+			"I dcs=03 data=09",
+			"I dcs=04 data=10",
+			"I dcs=05 data=4c",
+			"I dcs=06 data=0b",
+			"I dcs=07 data=11",
+			"I dcs=08 data=0e",
+			"I dcs=09 data=0d",
+			"I dcs=0a data=11",
+			"I dcs=0b data=5f",
+			"I dcs=0c data=14",
+			"I dcs=0d data=18",
+			"I dcs=0e data=3e",
+			"I dcs=0f data=3d",
+			"I dcs=10 data=3f",
+			"I dcs=20 data=00",
+			"I dcs=21 data=0b",
+			"I dcs=22 data=12",
+			"I dcs=23 data=03",
+			"I dcs=24 data=08",
+			"I dcs=25 data=40",
+			"I dcs=26 data=0b",
+			"I dcs=27 data=09",
+			"I dcs=28 data=0e",
+			"I dcs=29 data=0d",
+			"I dcs=2a data=11",
+			"I dcs=2b data=5f",
+			"I dcs=2c data=14",
+			"I dcs=2d data=18",
+			"I dcs=2e data=3e",
+			"I dcs=2f data=3d",
+			"I dcs=30 data=3f",
+			"I gen=ee04",
+			"I dcs=00 data=01",
+			"I dcs=01 data=01",
+			"I dcs=02 data=e0",
+			"I dcs=03 data=05",
+			"I dcs=04 data=00",
+			"I dcs=06 data=14",
+			"I dcs=07 data=05",
+			"I dcs=08 data=12",
+			"I dcs=09 data=20",
+			"I dcs=0a data=0f",
+			"I dcs=0b data=04",
+			"I dcs=20 data=40",
+			"I dcs=2a data=00",
+			"I dcs=40 data=80",
+			"I dcs=41 data=60",
+			"I gen=ee05",
+			"I dcs=00 data=05",
+			"I dcs=01 data=09",
+			"I dcs=02 data=05",
+			"I dcs=03 data=05",
+			"I dcs=07 data=01",
+			"I dcs=08 data=05",
+			"I dcs=09 data=00",
+			"I dcs=10 data=08",
+			"I dcs=11 data=0c",
+			"I dcs=12 data=25",
+			"I dcs=13 data=05",
+			"I dcs=19 data=90",
+			"I dcs=1a data=77",
+			"I dcs=23 data=00",
+			"I dcs=30 data=01",
+			"I dcs=31 data=01",
+			"I dcs=32 data=00",
+			"I dcs=33 data=14",
+			"I dcs=34 data=14",
+			"I dcs=35 data=b4",
+			"I dcs=36 data=01",
+			"I dcs=37 data=01",
+			"I dcs=38 data=00",
+			"I dcs=39 data=14",
+			"I dcs=3a data=14",
+			"I dcs=40 data=00",
+			"I dcs=41 data=00",
+			"I dcs=43 data=11",
+			"I dcs=44 data=01",
+			"I dcs=45 data=81",
+			"I dcs=46 data=06",
+			"I dcs=47 data=03",
+			"I gen=ee06",
+			"I dcs=00 data=23",
+			"I dcs=01 data=01",
+			"I dcs=02 data=04",
+			"I dcs=06 data=cd",
+			"I dcs=08 data=67",
+			"I dcs=09 data=45",
+			"I dcs=0a data=23",
+			"I dcs=0b data=01",
+			"I gen=ee07",
+			"I dcs=00 data=14",
+			"I dcs=01 data=14",
+			"I dcs=02 data=16",
+			"I dcs=03 data=16",
+			"I dcs=04 data=10",
+			"I dcs=05 data=10",
+			"I dcs=06 data=12",
+			"I dcs=07 data=12",
+			"I dcs=08 data=0d",
+			"I dcs=09 data=0d",
+			"I dcs=0a data=00",
+			"I dcs=0b data=00",
+			"I dcs=0c data=0c",
+			"I dcs=0d data=0c",
+			"I dcs=0e data=04",
+			"I dcs=0f data=04",
+			"I dcs=10 data=3c",
+			"I dcs=11 data=3c",
+			"I dcs=12 data=20",
+			"I dcs=13 data=20",
+			"I dcs=14 data=21",
+			"I dcs=15 data=21",
+			"I dcs=20 data=15",
+			"I dcs=21 data=15",
+			"I dcs=22 data=17",
+			"I dcs=23 data=17",
+			"I dcs=24 data=11",
+			"I dcs=25 data=11",
+			"I dcs=26 data=13",
+			"I dcs=27 data=13",
+			"I dcs=28 data=0d",
+			"I dcs=29 data=0d",
+			"I dcs=2a data=01",
+			"I dcs=2b data=01",
+			"I dcs=2c data=0c",
+			"I dcs=2d data=0c",
+			"I dcs=2e data=04",
+			"I dcs=2f data=04",
+			"I dcs=30 data=3c",
+			"I dcs=31 data=3c",
+			"I dcs=32 data=20",
+			"I dcs=33 data=20",
+			"I dcs=34 data=21",
+			"I dcs=35 data=21",
+			"I gen=ee08",
+			"I dcs=12 data=da",
+			"I dcs=13 data=9b",
+			"I dcs=18 data=00",
+			"I dcs=20 data=00",
+			"I dcs=22 data=69",
+			"I dcs=2c data=20",
+			"I dcs=4b data=a0",
+			"I dcs=61 data=20",
+			"I gen=ee0f",
+			"I dcs=00 data=01",
+			"I gen=ee00",
+			"I gen=ea00",
+			"I gen=eb00",
+			"I dcs=36 data=00",
+			"I dcs=11 data=00 wait=3c",
+			"I dcs=29 data=00 wait=a";
+
+		port {
+			panel_in: endpoint {
+				remote-endpoint = <&dsi0_out>;
+			};
+		};
+	};
+};
+
+&dsi0_in {
+	remote-endpoint = <&dither0_out>;
+};
+
+&dsi0_out {
+	remote-endpoint = <&panel_in>;
+};
+
+&mipi_tx0 {
+	status = "okay";
+};
+
 &{/soc} {
 	/* Vol Down is keypad matrix key 0, pins left as LK set them */
 	keypad@10010000 {
