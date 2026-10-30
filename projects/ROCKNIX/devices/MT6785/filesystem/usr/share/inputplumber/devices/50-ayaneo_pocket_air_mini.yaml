@@ -18,11 +18,13 @@ source_devices:
     evdev:
       name: Pocket Air Mini Buttons
       handler: event*
+    capability_map_id: ayaneo_pocket_air_mini
 
   - group: gamepad
     evdev:
       name: gamepad-joystick
       handler: event*
+    capability_map_id: ayaneo_pocket_air_mini
 
 target_devices:
   - xbox-elite
