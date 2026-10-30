@@ -1,0 +1,154 @@
+diff --git a/drivers/mfd/mt6397-core.c b/drivers/mfd/mt6397-core.c
+index 1bdacda9a..9bd13c22e 100644
+--- a/drivers/mfd/mt6397-core.c
++++ b/drivers/mfd/mt6397-core.c
+@@ -251,6 +251,10 @@ static const struct mfd_cell mt6359_devs[] = {
+ 		.num_resources = ARRAY_SIZE(mt6359_accdet_resources),
+ 		.resources = mt6359_accdet_resources,
+ 	},
++	{
++		.name = "mt6323-pwrc",
++		.of_compatible = "mediatek,mt6359-pwrc",
++	},
+ };
+ 
+ static const struct mfd_cell mt6397_devs[] = {
+diff --git a/drivers/power/reset/mt6323-poweroff.c b/drivers/power/reset/mt6323-poweroff.c
+index c66334754..194a3de25 100644
+--- a/drivers/power/reset/mt6323-poweroff.c
++++ b/drivers/power/reset/mt6323-poweroff.c
+@@ -16,6 +16,18 @@
+ #include <linux/mfd/mt6397/rtc.h>
+ #include <linux/reboot.h>
+ 
++/* MT6359: RTC block at 0x588 as on MT6358, power hold in PPCCTL0 */
++#define MT6359_RTC_BASE			0x0588
++#define MT6359_RTC_AL_SEC		0x0018
++#define MT6359_RTC_AL_SEC_AUTO_PDN_SEL	BIT(6)
++#define MT6359_RTC_AL_SEC_2SEC_EN	BIT(8)
++#define MT6359_RTC_PROT			0x0034
++#define MT6359_RTC_PROT_UNLOCK1		0x586a
++#define MT6359_RTC_PROT_UNLOCK2		0x9136
++#define MT6359_RTC_BBPU_PWREN		BIT(0)
++#define MT6359_PPCCTL0			0x0a08
++#define MT6359_PPCCTL0_PWRHOLD		BIT(0)
++
+ struct mt6323_pwrc {
+ 	struct device *dev;
+ 	struct regmap *regmap;
+@@ -47,9 +59,43 @@ static int mt6323_do_pwroff(struct sys_off_data *data)
+ 	return NOTIFY_DONE;
+ }
+ 
++static void mt6359_rtc_write(struct mt6323_pwrc *pwrc, u32 reg, u32 val)
++{
++	unsigned int bbpu;
++
++	regmap_write(pwrc->regmap, pwrc->base + reg, val);
++	regmap_write(pwrc->regmap, pwrc->base + RTC_WRTGR_MT6358, 1);
++	if (regmap_read_poll_timeout(pwrc->regmap, pwrc->base + RTC_BBPU, bbpu,
++				     !(bbpu & RTC_BBPU_CBUSY),
++				     MTK_RTC_POLL_DELAY_US, MTK_RTC_POLL_TIMEOUT))
++		dev_err(pwrc->dev, "RTC write 0x%x timed out\n", reg);
++}
++
++/* Same steps as MediaTek's LK rtc_bbpu_power_down() for this PMIC */
++static int mt6359_do_pwroff(struct sys_off_data *data)
++{
++	struct mt6323_pwrc *pwrc = data->cb_data;
++	unsigned int val;
++
++	regmap_read(pwrc->regmap, pwrc->base + MT6359_RTC_AL_SEC, &val);
++	mt6359_rtc_write(pwrc, MT6359_RTC_AL_SEC, val &
++			 ~(MT6359_RTC_AL_SEC_2SEC_EN | MT6359_RTC_AL_SEC_AUTO_PDN_SEL));
++	mt6359_rtc_write(pwrc, MT6359_RTC_PROT, MT6359_RTC_PROT_UNLOCK1);
++	mt6359_rtc_write(pwrc, MT6359_RTC_PROT, MT6359_RTC_PROT_UNLOCK2);
++	mt6359_rtc_write(pwrc, RTC_BBPU, RTC_BBPU_KEY | MT6359_RTC_BBPU_PWREN);
++	regmap_update_bits(pwrc->regmap, MT6359_PPCCTL0, MT6359_PPCCTL0_PWRHOLD, 0);
++
++	mdelay(1000);
++
++	WARN_ONCE(1, "Unable to power off system\n");
++
++	return NOTIFY_DONE;
++}
++
+ static int mt6323_pwrc_probe(struct platform_device *pdev)
+ {
+ 	struct mt6397_chip *mt6397_chip = dev_get_drvdata(pdev->dev.parent);
++	int (*pwroff)(struct sys_off_data *data) = mt6323_do_pwroff;
+ 	struct mt6323_pwrc *pwrc;
+ 	struct resource *res;
+ 	int ret;
+@@ -58,18 +104,22 @@ static int mt6323_pwrc_probe(struct platform_device *pdev)
+ 	if (!pwrc)
+ 		return -ENOMEM;
+ 
+-	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
+-	if (!res)
+-		return -EINVAL;
+-
+-	pwrc->base = res->start;
++	if (of_device_is_compatible(pdev->dev.of_node, "mediatek,mt6359-pwrc")) {
++		pwrc->base = MT6359_RTC_BASE;
++		pwroff = mt6359_do_pwroff;
++	} else {
++		res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++		if (!res)
++			return -EINVAL;
++		pwrc->base = res->start;
++	}
+ 	pwrc->regmap = mt6397_chip->regmap;
+ 	pwrc->dev = &pdev->dev;
+ 
+ 	ret = devm_register_sys_off_handler(pwrc->dev,
+ 					    SYS_OFF_MODE_POWER_OFF,
+ 					    SYS_OFF_PRIO_DEFAULT,
+-					    mt6323_do_pwroff,
++					    pwroff,
+ 					    pwrc);
+ 	if (ret)
+ 		return dev_err_probe(pwrc->dev, ret, "failed to register power-off handler\n");
+@@ -79,6 +129,7 @@ static int mt6323_pwrc_probe(struct platform_device *pdev)
+ 
+ static const struct of_device_id mt6323_pwrc_dt_match[] = {
+ 	{ .compatible = "mediatek,mt6323-pwrc" },
++	{ .compatible = "mediatek,mt6359-pwrc" },
+ 	{},
+ };
+ MODULE_DEVICE_TABLE(of, mt6323_pwrc_dt_match);
+diff --git a/drivers/regulator/mt6360-regulator.c b/drivers/regulator/mt6360-regulator.c
+index 24cc9fc94..47ed72967 100644
+--- a/drivers/regulator/mt6360-regulator.c
++++ b/drivers/regulator/mt6360-regulator.c
+@@ -451,12 +451,30 @@ static const struct platform_device_id mt6360_regulator_id_table[] = {
+ };
+ MODULE_DEVICE_TABLE(platform, mt6360_regulator_id_table);
+ 
++/* PMIC page 0x07..0x0a: per-rail power-off sequence, as MediaTek's LK sets it */
++#define MT6360_PMIC_POFF_SEQ	0x107
++
++static void mt6360_regulator_shutdown(struct platform_device *pdev)
++{
++	static const u8 seq[] = { 0x06, 0x04, 0x00, 0x02 };
++	struct regmap *regmap = dev_get_regmap(pdev->dev.parent, NULL);
++	int i;
++
++	if (system_state != SYSTEM_POWER_OFF || !regmap ||
++	    !device_property_read_bool(&pdev->dev, "mediatek,poweroff-sequence"))
++		return;
++
++	for (i = 0; i < ARRAY_SIZE(seq); i++)
++		regmap_write(regmap, MT6360_PMIC_POFF_SEQ + i, seq[i]);
++}
++
+ static struct platform_driver mt6360_regulator_driver = {
+ 	.driver = {
+ 		.name = "mt6360-regulator",
+ 		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
+ 	},
+ 	.probe = mt6360_regulator_probe,
++	.shutdown = mt6360_regulator_shutdown,
+ 	.id_table = mt6360_regulator_id_table,
+ };
+ module_platform_driver(mt6360_regulator_driver);

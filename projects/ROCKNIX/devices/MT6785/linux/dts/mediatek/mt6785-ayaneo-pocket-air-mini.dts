@@ -1,0 +1,238 @@
+// SPDX-License-Identifier: (GPL-2.0 OR MIT)
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/input.h>
+
+#include "mediatek/mt6785.dtsi"
+
+/ {
+	model = "AYANEO Pocket Air Mini";
+	compatible = "ayaneo,pocket-air-mini", "mediatek,mt6785";
+	chassis-type = "handset";
+
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/* needed by Little Kernel */
+		bootargs = "";
+
+		/* reg, stride and height are patched in by the custom LK (fdt_fixup_simplefb) */
+		framebuffer0: framebuffer@7ed90000 {
+			compatible = "simple-framebuffer";
+			reg = <0 0x7ed90000 0 0x1070000>;
+			width = <1280>;
+			height = <3366>;
+			stride = <(1280 * 4)>;
+			format = "a8r8g8b8";
+		};
+	};
+
+	/*
+	 * Must stay empty: LK appends its own mblock-* regions here and spins in
+	 * reserved_memory_conflict_check() if any node overlaps one of them.
+	 */
+	reserved-memory {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+	};
+
+	/* needed by Little Kernel */
+	scp {
+		compatible = "mediatek,scp";
+	};
+
+	/*
+	 * Description only (no GPIO/enable): MT6359 VEMC, which LK leaves on.
+	 * Replace with the real PMIC regulator once MT6359 is described.
+	 */
+	emmc_vcc: regulator-emmc-vcc {
+		compatible = "regulator-fixed";
+		regulator-name = "emmc_vcc";
+		regulator-min-microvolt = <3000000>;
+		regulator-max-microvolt = <3000000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+};
+
+/*
+ * MT6359 for its keys only: no regulator/rtc/codec/adc node, so no rail is
+ * described. Leave power-off-time-sec / long-press-mode out: mainline's
+ * MT6359_TOP_RST_MISC (0x14c) is the vendor's TOP_RST_MISC_SET, so the default
+ * all-zero update is a no-op and the long-press reset stays as LK set it.
+ */
+&pwrap {
+	pmic {
+		compatible = "mediatek,mt6359";
+		interrupts-extended = <&pio 193 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-controller;
+		#interrupt-cells = <2>;
+
+		/* RTC BBPU + PWRHOLD power-off (patches/0001) */
+		power-controller {
+			compatible = "mediatek,mt6359-pwrc";
+		};
+
+		keys {
+			compatible = "mediatek,mt6359-keys";
+
+			power {
+				linux,keycodes = <KEY_POWER>;
+				wakeup-source;
+			};
+
+			home {
+				linux,keycodes = <KEY_VOLUMEUP>;
+			};
+		};
+	};
+};
+
+&{/soc} {
+	/* Vol Down is keypad matrix key 0, pins left as LK set them */
+	keypad@10010000 {
+		compatible = "mediatek,mt6779-keypad";
+		reg = <0 0x10010000 0 0x1000>;
+		interrupts = <GIC_SPI 75 IRQ_TYPE_EDGE_FALLING>;
+		clocks = <&clk26m>;
+		clock-names = "kpd";
+		keypad,num-rows = <1>;
+		keypad,num-columns = <1>;
+		linux,keymap = <MATRIX_KEY(0, 0, KEY_VOLUMEDOWN)>;
+	};
+};
+
+/* pins already muxed by LK, which drives the MT6360 itself */
+&i2c5 {
+	clock-frequency = <400000>;
+	status = "okay";
+
+	pmic@34 {
+		compatible = "mediatek,mt6360";
+		reg = <0x34>;
+		interrupts-extended = <&pio 16 IRQ_TYPE_EDGE_FALLING>;
+		interrupt-names = "IRQB";
+		interrupt-controller;
+		#interrupt-cells = <1>;
+
+		regulator {
+			compatible = "mediatek,mt6360-regulator";
+			/* arm the vendor power-off sequence before power-off (patches/0001) */
+			mediatek,poweroff-sequence;
+
+			/*
+			 * SD rails only. buck2/ldo6/ldo7 feed DRAM and ldo1/ldo2 the
+			 * pad/touch: left undescribed so the kernel cannot touch them.
+			 * Capped at the 3.0 V GammaOS uses; no UHS, so VMC never goes to 1.8 V.
+			 */
+			mt6360_vmc: ldo3 {
+				regulator-name = "vmc";
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <3000000>;
+			};
+
+			mt6360_vmch: ldo5 {
+				regulator-name = "vmch";
+				regulator-min-microvolt = <3000000>;
+				regulator-max-microvolt = <3000000>;
+			};
+		};
+	};
+};
+
+/* eMMC: conservative 52 MHz SDR first, no hw-reset, IO voltage untouched */
+&mmc0 {
+	bus-width = <8>;
+	max-frequency = <52000000>;
+	cap-mmc-highspeed;
+	non-removable;
+	no-sd;
+	no-sdio;
+	vmmc-supply = <&emmc_vcc>;
+
+	pinctrl-names = "default", "state_uhs";
+	pinctrl-0 = <&mmc0_pins>;
+	pinctrl-1 = <&mmc0_pins>;
+
+	status = "okay";
+};
+
+/*
+ * SD: 50 MHz high-speed only (no UHS, so VMC stays at the 3.0 V cap and never
+ * switches to 1.8 V). Card detect GPIO8 is pulled up and reads 0 with a card
+ * (vendor cd_level = 0); its pin state is already right, so none is applied.
+ */
+&mmc1 {
+	bus-width = <4>;
+	max-frequency = <50000000>;
+	cap-sd-highspeed;
+	disable-wp;
+	no-mmc;
+	no-sdio;
+	cd-gpios = <&pio 8 GPIO_ACTIVE_LOW>;
+	vmmc-supply = <&mt6360_vmch>;
+	vqmmc-supply = <&mt6360_vmc>;
+
+	pinctrl-names = "default", "state_uhs";
+	pinctrl-0 = <&mmc1_pins>;
+	pinctrl-1 = <&mmc1_pins>;
+
+	status = "okay";
+};
+
+&pio {
+	/* stock drive strength and pulls */
+	mmc1_pins: mmc1-pins {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO135__FUNC_MSDC1_CMD>,
+				 <PINMUX_GPIO137__FUNC_MSDC1_DAT0>,
+				 <PINMUX_GPIO139__FUNC_MSDC1_DAT1>,
+				 <PINMUX_GPIO138__FUNC_MSDC1_DAT2>,
+				 <PINMUX_GPIO136__FUNC_MSDC1_DAT3>;
+			bias-pull-up = <MTK_PUPD_SET_R1R0_10>;
+			drive-strength = <8>;
+		};
+
+		pins-clk {
+			pinmux = <PINMUX_GPIO134__FUNC_MSDC1_CLK>;
+			bias-pull-down = <MTK_PUPD_SET_R1R0_10>;
+			drive-strength = <8>;
+		};
+	};
+
+	/* stock drive strength and pulls */
+	mmc0_pins: mmc0-pins {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO167__FUNC_MSDC0_CMD>,
+				 <PINMUX_GPIO168__FUNC_MSDC0_DAT0>,
+				 <PINMUX_GPIO172__FUNC_MSDC0_DAT1>,
+				 <PINMUX_GPIO169__FUNC_MSDC0_DAT2>,
+				 <PINMUX_GPIO177__FUNC_MSDC0_DAT3>,
+				 <PINMUX_GPIO170__FUNC_MSDC0_DAT4>,
+				 <PINMUX_GPIO173__FUNC_MSDC0_DAT5>,
+				 <PINMUX_GPIO171__FUNC_MSDC0_DAT6>,
+				 <PINMUX_GPIO174__FUNC_MSDC0_DAT7>,
+				 <PINMUX_GPIO178__FUNC_MSDC0_RSTB>;
+			bias-pull-up = <MTK_PUPD_SET_R1R0_01>;
+			drive-strength = <10>;
+		};
+
+		pins-clk-ds {
+			pinmux = <PINMUX_GPIO176__FUNC_MSDC0_CLK>,
+				 <PINMUX_GPIO175__FUNC_MSDC0_DSL>;
+			bias-pull-down = <MTK_PUPD_SET_R1R0_10>;
+			drive-strength = <10>;
+		};
+	};
+};
+
+/* device-only until the MT6360 Type-C role switch is described; VUSB is left on by LK */
+&ssusb {
+	dr_mode = "peripheral";
+	maximum-speed = "high-speed";
+	status = "okay";
+};
