@@ -1,0 +1,36 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Thu, 30 Oct 2026 17:30:00 +0000
+Subject: [PATCH] iio: adc: mt6577_auxadc: expose raw channel values
+
+adc-joystick reads its channels with iio_read_channel_raw(), but the
+auxadc only reports processed millivolts. Report the 12-bit sample as
+IIO_CHAN_INFO_RAW too.
+---
+diff --git a/drivers/iio/adc/mt6577_auxadc.c b/drivers/iio/adc/mt6577_auxadc.c
+index fe9e3ece3..133a751bd 100644
+--- a/drivers/iio/adc/mt6577_auxadc.c
++++ b/drivers/iio/adc/mt6577_auxadc.c
+@@ -65,7 +65,8 @@ static const struct mtk_auxadc_compatible mt6765_compat = {
+ 		.type = IIO_VOLTAGE,				    \
+ 		.indexed = 1,					    \
+ 		.channel = (idx),				    \
+-		.info_mask_separate = BIT(IIO_CHAN_INFO_PROCESSED), \
++		.info_mask_separate = BIT(IIO_CHAN_INFO_RAW) |	    \
++				      BIT(IIO_CHAN_INFO_PROCESSED), \
+ }
+ 
+ static const struct iio_chan_spec mt6577_auxadc_iio_channels[] = {
+@@ -190,6 +191,13 @@ static int mt6577_auxadc_read_raw(struct iio_dev *indio_dev,
+ 	struct mt6577_auxadc_device *adc_dev = iio_priv(indio_dev);
+ 
+ 	switch (info) {
++	case IIO_CHAN_INFO_RAW:
++		*val = mt6577_auxadc_read(indio_dev, chan);
++		if (*val < 0)
++			return *val;
++
++		return IIO_VAL_INT;
++
+ 	case IIO_CHAN_INFO_PROCESSED:
+ 		*val = mt6577_auxadc_read(indio_dev, chan);
+ 		if (*val < 0) {

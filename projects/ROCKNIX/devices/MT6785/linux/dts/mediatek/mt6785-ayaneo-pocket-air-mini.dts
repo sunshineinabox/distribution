@@ -93,6 +93,180 @@
 		pinctrl-0 = <&fan_pins>;
 	};
 
+	/* Start/Select codes as stock, D-pad as buttons */
+	gamepad-keys {
+		compatible = "gpio-keys";
+		label = "Pocket Air Mini Buttons";
+		pinctrl-names = "default";
+		pinctrl-0 = <&gamepad_key_pins>;
+
+		button-a {
+			label = "a";
+			linux,code = <BTN_SOUTH>;
+			gpios = <&pio 82 GPIO_ACTIVE_LOW>;
+		};
+
+		button-b {
+			label = "b";
+			linux,code = <BTN_EAST>;
+			gpios = <&pio 83 GPIO_ACTIVE_LOW>;
+		};
+
+		button-x {
+			label = "x";
+			linux,code = <BTN_NORTH>;
+			gpios = <&pio 84 GPIO_ACTIVE_LOW>;
+		};
+
+		button-y {
+			label = "y";
+			linux,code = <BTN_WEST>;
+			gpios = <&pio 85 GPIO_ACTIVE_LOW>;
+		};
+
+		button-lb {
+			label = "lb";
+			linux,code = <BTN_TL>;
+			gpios = <&pio 92 GPIO_ACTIVE_LOW>;
+		};
+
+		button-rb {
+			label = "rb";
+			linux,code = <BTN_TR>;
+			gpios = <&pio 81 GPIO_ACTIVE_LOW>;
+		};
+
+		button-l3 {
+			label = "l3";
+			linux,code = <BTN_THUMBL>;
+			gpios = <&pio 94 GPIO_ACTIVE_LOW>;
+		};
+
+		button-r3 {
+			label = "r3";
+			linux,code = <BTN_THUMBR>;
+			gpios = <&pio 93 GPIO_ACTIVE_LOW>;
+		};
+
+		button-select {
+			label = "select";
+			linux,code = <BTN_SELECT>;
+			gpios = <&pio 90 GPIO_ACTIVE_LOW>;
+		};
+
+		button-start {
+			label = "start";
+			linux,code = <BTN_START>;
+			gpios = <&pio 91 GPIO_ACTIVE_LOW>;
+		};
+
+		button-dpad-up {
+			label = "dpad-up";
+			linux,code = <BTN_DPAD_UP>;
+			gpios = <&pio 89 GPIO_ACTIVE_LOW>;
+		};
+
+		button-dpad-down {
+			label = "dpad-down";
+			linux,code = <BTN_DPAD_DOWN>;
+			gpios = <&pio 79 GPIO_ACTIVE_LOW>;
+		};
+
+		button-dpad-left {
+			label = "dpad-left";
+			linux,code = <BTN_DPAD_LEFT>;
+			gpios = <&pio 78 GPIO_ACTIVE_LOW>;
+		};
+
+		button-dpad-right {
+			label = "dpad-right";
+			linux,code = <BTN_DPAD_RIGHT>;
+			gpios = <&pio 80 GPIO_ACTIVE_LOW>;
+		};
+
+		button-aya {
+			label = "aya";
+			linux,code = <BTN_MODE>;
+			gpios = <&pio 86 GPIO_ACTIVE_LOW>;
+		};
+
+		button-menu {
+			label = "menu";
+			linux,code = <BTN_TRIGGER_HAPPY1>;
+			gpios = <&pio 87 GPIO_ACTIVE_LOW>;
+		};
+
+		button-lc {
+			label = "lc";
+			linux,code = <BTN_TRIGGER_HAPPY2>;
+			gpios = <&pio 58 GPIO_ACTIVE_LOW>;
+		};
+
+		button-rc {
+			label = "rc";
+			linux,code = <BTN_TRIGGER_HAPPY3>;
+			gpios = <&pio 57 GPIO_ACTIVE_LOW>;
+		};
+	};
+
+	/* GammaOS mtk-gamepad: sticks on AUXADC 1-4, hall triggers on the SGM58031 */
+	gamepad-joystick {
+		compatible = "adc-joystick";
+		io-channels = <&auxadc 1>, <&auxadc 2>, <&auxadc 3>, <&auxadc 4>,
+			      <&trigger_adc 4>, <&trigger_adc 5>;
+		poll-interval = <8>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		axis@0 {
+			reg = <0>;
+			linux,code = <ABS_X>;
+			abs-range = <0 4095>;
+			abs-fuzz = <32>;
+			abs-flat = <64>;
+		};
+
+		axis@1 {
+			reg = <1>;
+			linux,code = <ABS_Y>;
+			abs-range = <0 4095>;
+			abs-fuzz = <32>;
+			abs-flat = <64>;
+		};
+
+		axis@2 {
+			reg = <2>;
+			linux,code = <ABS_RX>;
+			abs-range = <0 4095>;
+			abs-fuzz = <32>;
+			abs-flat = <64>;
+		};
+
+		axis@3 {
+			reg = <3>;
+			linux,code = <ABS_RY>;
+			abs-range = <0 4095>;
+			abs-fuzz = <32>;
+			abs-flat = <64>;
+		};
+
+		axis@4 {
+			reg = <4>;
+			linux,code = <ABS_Z>;
+			abs-range = <8000 25000>;
+			abs-fuzz = <64>;
+			abs-flat = <0>;
+		};
+
+		axis@5 {
+			reg = <5>;
+			linux,code = <ABS_RZ>;
+			abs-range = <8000 25000>;
+			abs-fuzz = <64>;
+			abs-flat = <0>;
+		};
+	};
+
 	/*
 	 * GammaOS: 85 C throttles the CPUs and the GPU, 117 C resets. The VPU
 	 * only gets the critical trip. The fan follows the big cluster and the
@@ -840,6 +1014,15 @@
 };
 
 &{/soc} {
+	/* MT6765 register layout */
+	auxadc: adc@11001000 {
+		compatible = "mediatek,mt6785-auxadc", "mediatek,mt6765-auxadc";
+		reg = <0 0x11001000 0 0x1000>;
+		clocks = <&infracfg CLK_INFRA_AUXADC>;
+		clock-names = "main";
+		#io-channel-cells = <1>;
+	};
+
 	efuse@11c10000 {
 		compatible = "mediatek,mt6785-efuse", "mediatek,efuse";
 		reg = <0 0x11c10000 0 0x1000>;
@@ -963,7 +1146,77 @@
 	status = "okay";
 };
 
+&i2c6 {
+	clock-frequency = <400000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c6_pins>;
+	status = "okay";
+
+	/* SGM58031, register compatible with the ADS1115; GammaOS reads AIN0/AIN1 at 4.096 V, 860 SPS */
+	trigger_adc: adc@48 {
+		compatible = "ti,ads1115";
+		reg = <0x48>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+		#io-channel-cells = <1>;
+
+		channel@4 {
+			reg = <4>;
+			ti,gain = <1>;
+			ti,datarate = <7>;
+		};
+
+		channel@5 {
+			reg = <5>;
+			ti,gain = <1>;
+			ti,datarate = <7>;
+		};
+	};
+};
+
 &pio {
+	/* GammaOS mtk-gamepad drives this high to power the SGM58031 */
+	gamepad-en-hog {
+		gpio-hog;
+		gpios = <15 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "gamepad-en";
+	};
+
+	/* stock pulls */
+	gamepad_key_pins: gamepad-key-pins {
+		pins-keys {
+			pinmux = <PINMUX_GPIO57__FUNC_GPIO57>,
+				 <PINMUX_GPIO58__FUNC_GPIO58>,
+				 <PINMUX_GPIO78__FUNC_GPIO78>,
+				 <PINMUX_GPIO79__FUNC_GPIO79>,
+				 <PINMUX_GPIO80__FUNC_GPIO80>,
+				 <PINMUX_GPIO81__FUNC_GPIO81>,
+				 <PINMUX_GPIO82__FUNC_GPIO82>,
+				 <PINMUX_GPIO83__FUNC_GPIO83>,
+				 <PINMUX_GPIO84__FUNC_GPIO84>,
+				 <PINMUX_GPIO85__FUNC_GPIO85>,
+				 <PINMUX_GPIO86__FUNC_GPIO86>,
+				 <PINMUX_GPIO87__FUNC_GPIO87>,
+				 <PINMUX_GPIO89__FUNC_GPIO89>,
+				 <PINMUX_GPIO90__FUNC_GPIO90>,
+				 <PINMUX_GPIO91__FUNC_GPIO91>,
+				 <PINMUX_GPIO92__FUNC_GPIO92>,
+				 <PINMUX_GPIO93__FUNC_GPIO93>,
+				 <PINMUX_GPIO94__FUNC_GPIO94>;
+			input-enable;
+			bias-pull-up;
+		};
+	};
+
+	i2c6_pins: i2c6-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO45__FUNC_SCL6>,
+				 <PINMUX_GPIO46__FUNC_SDA6>;
+			bias-pull-up;
+		};
+	};
+
 	fan_pins: fan-pins {
 		pins-tach {
 			pinmux = <PINMUX_GPIO40__FUNC_GPIO40>;

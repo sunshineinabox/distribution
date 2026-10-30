@@ -1,0 +1,28 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ShadowBlip/InputPlumber/main/rootfs/usr/share/inputplumber/schema/composite_device_v1.json
+version: 1
+kind: CompositeDevice
+name: AYANEO Pocket Air Mini
+
+options:
+  auto_manage: true
+
+matches:
+  - udev:
+      sys_path: /sys/firmware/devicetree/base
+      attributes:
+        - name: compatible
+          value: ayaneo,pocket-air-mini
+
+source_devices:
+  - group: gamepad
+    evdev:
+      name: Pocket Air Mini Buttons
+      handler: event*
+
+  - group: gamepad
+    evdev:
+      name: adc-joystick
+      handler: event*
+
+target_devices:
+  - xbox-elite
