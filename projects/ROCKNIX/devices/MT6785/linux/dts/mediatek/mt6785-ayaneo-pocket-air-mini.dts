@@ -1295,11 +1295,14 @@
 	};
 };
 
-/* eMMC: conservative 52 MHz SDR first, no hw-reset, IO voltage untouched */
+/* stock msdc0 caps without hw-reset, 1.8 V I/O from a fixed rail so no vqmmc */
 &mmc0 {
 	bus-width = <8>;
-	max-frequency = <52000000>;
+	max-frequency = <200000000>;
 	cap-mmc-highspeed;
+	mmc-ddr-1_8v;
+	mmc-hs200-1_8v;
+	mmc-hs400-1_8v;
 	non-removable;
 	no-sd;
 	no-sdio;
@@ -1312,15 +1315,16 @@
 	status = "okay";
 };
 
-/*
- * SD: 50 MHz high-speed only (no UHS, so VMC stays at the 3.0 V cap and never
- * switches to 1.8 V). Card detect GPIO8 is pulled up and reads 0 with a card
- * (vendor cd_level = 0); its pin state is already right, so none is applied.
- */
+/* stock msdc1 caps; card detect GPIO8 reads low with a card and needs no pin state */
 &mmc1 {
 	bus-width = <4>;
-	max-frequency = <50000000>;
+	max-frequency = <200000000>;
 	cap-sd-highspeed;
+	sd-uhs-sdr12;
+	sd-uhs-sdr25;
+	sd-uhs-sdr50;
+	sd-uhs-sdr104;
+	sd-uhs-ddr50;
 	disable-wp;
 	no-mmc;
 	no-sdio;
