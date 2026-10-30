@@ -1,0 +1,53 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Thu, 30 Oct 2026 12:30:00 +0000
+Subject: [PATCH] thermal/drivers/mediatek/lvts: complete the MT6785 data
+
+Fill in the missing MT6785 ops, calibration offsets and connect/init
+commands from the vendor mtk_lvts_tc.c in Xiaomi's begonia-r-oss kernel.
+Also write CALSCALE, which is computed but never stored.
+---
+diff --git a/drivers/thermal/mediatek/lvts_thermal.c b/drivers/thermal/mediatek/lvts_thermal.c
+--- a/drivers/thermal/mediatek/lvts_thermal.c
++++ b/drivers/thermal/mediatek/lvts_thermal.c
+@@ -1197,8 +1197,8 @@ static int lvts_ctrl_configure(struct device *dev, struct lvts_ctrl *lvts_ctrl)
+ 	/*
+ 	 * LVTS_CALSCALE : ADC voltage round
+ 	 */
+-	value = 0x300;
+ 	value = LVTS_CALSCALE_CONF;
++	writel(value, LVTS_CALSCALE(lvts_ctrl->base));
+ 
+ 	/*
+ 	 * LVTS_MSRCTL0 : Sensor filtering strategy
+@@ -1617,6 +1617,14 @@ static const u32 mt7988_init_cmds[] = {
+ 	0xC10306B8
+ };
+ 
++/* MT6785 vendor lvts_Device_Enable_Init_all_Devices, AUTO_RCK, single mode */
++static const u32 mt6785_conn_cmds[] = { 0x8103FFFF, 0x8502FF55 };
++
++static const u32 mt6785_init_cmds[] = {
++	0x81030420, 0x81030500, 0x81030300, 0x810308C3, 0x8103098D,
++	0x81030C7C, 0x81030AA8, 0x81030B04, 0x81030E01, 0x810306B8
++};
++
+ static const struct lvts_ctrl_data mt6785_lvts_data_ctrl[] = {
+ 	{
+ 		.lvts_sensor = {
+@@ -2065,10 +2073,16 @@ static const struct lvts_platform_ops lvts_platform_ops_mt8196 = {
+ static const struct lvts_data mt6785_lvts_data = {
+ 	.lvts_ctrl	= mt6785_lvts_data_ctrl,
+ 	.num_lvts_ctrl	= ARRAY_SIZE(mt6785_lvts_data_ctrl),
++	.conn_cmd	= mt6785_conn_cmds,
++	.init_cmd	= mt6785_init_cmds,
++	.num_conn_cmd	= ARRAY_SIZE(mt6785_conn_cmds),
++	.num_init_cmd	= ARRAY_SIZE(mt6785_init_cmds),
+ 	.temp_factor	= LVTS_COEFF_A_MT7988,
+ 	.temp_offset	= LVTS_COEFF_B_MT7988,
+ 	.gt_calib_bit_offset = 0,
++	.num_cal_offsets = LVTS_NUM_CAL_OFFSETS_MT7988,
+ 	.def_calibration = 19000,
++	.ops = &lvts_platform_ops_mt7988,
+ };
+ 
+ static const struct lvts_data mt7987_lvts_ap_data = {

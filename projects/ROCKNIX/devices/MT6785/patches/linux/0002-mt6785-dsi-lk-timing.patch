@@ -1,0 +1,168 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Thu, 30 Oct 2026 12:00:00 +0000
+Subject: [PATCH] drm/mediatek: dsi: program MT6785 D-PHY like MediaTek LK
+
+Program the MT6785 D-PHY timings, porch word counts and clock lane LP
+mode the way MediaTek's LK does in platform/mt6785/ddp_dsi.c. Keep the
+bootloader's MIPI TX impedance trim when no efuse cell is described.
+---
+diff --git a/drivers/gpu/drm/mediatek/mtk_dsi.c b/drivers/gpu/drm/mediatek/mtk_dsi.c
+--- a/drivers/gpu/drm/mediatek/mtk_dsi.c
++++ b/drivers/gpu/drm/mediatek/mtk_dsi.c
+@@ -194,6 +194,7 @@ struct mtk_dsi_driver_data {
+ 	bool has_size_ctl;
+ 	bool cmdq_long_packet_ctl;
+ 	bool support_per_frame_lp;
++	bool vendor_timing;
+ };
+ 
+ struct mtk_dsi {
+@@ -249,22 +250,46 @@ static void mtk_dsi_phy_timconfig(struct mtk_dsi *dsi)
+ 	u32 data_rate_mhz = DIV_ROUND_UP(dsi->data_rate, HZ_PER_MHZ);
+ 	struct mtk_phy_timing *timing = &dsi->phy_timing;
+ 
+-	timing->lpx = (60 * data_rate_mhz / (8 * 1000)) + 1;
+-	timing->da_hs_prepare = (80 * data_rate_mhz + 4 * 1000) / 8000;
+-	timing->da_hs_zero = (170 * data_rate_mhz + 10 * 1000) / 8000 + 1 -
+-			     timing->da_hs_prepare;
+-	timing->da_hs_trail = timing->da_hs_prepare + 1;
+-
+-	timing->ta_go = 4 * timing->lpx - 2;
+-	timing->ta_sure = timing->lpx + 2;
+-	timing->ta_get = 4 * timing->lpx;
+-	timing->da_hs_exit = 2 * timing->lpx + 1;
+-
+-	timing->clk_hs_prepare = 70 * data_rate_mhz / (8 * 1000);
+-	timing->clk_hs_post = timing->clk_hs_prepare + 8;
+-	timing->clk_hs_trail = timing->clk_hs_prepare;
+-	timing->clk_hs_zero = timing->clk_hs_trail * 4;
+-	timing->clk_hs_exit = 2 * timing->clk_hs_trail;
++	if (dsi->driver_data->vendor_timing) {
++		/* MediaTek LK: ns budgets rounded down to byte-clock cycles */
++		u32 ui = 1000 / data_rate_mhz + 1;
++		u32 cycle = 8000 / data_rate_mhz + 1;
++
++		timing->lpx = max(80 / cycle, 1U);
++		timing->da_hs_prepare = max((64 + 5 * ui) / cycle, 1U);
++		timing->da_hs_zero = (200 + 10 * ui) / cycle;
++		if (timing->da_hs_zero > timing->da_hs_prepare)
++			timing->da_hs_zero -= timing->da_hs_prepare;
++		timing->da_hs_trail = max((4 * ui + 80) / cycle, 1U);
++
++		timing->ta_go = 4 * timing->lpx;
++		timing->ta_sure = 3 * timing->lpx / 2;
++		timing->ta_get = 5 * timing->lpx;
++		timing->da_hs_exit = 2 * timing->lpx;
++
++		timing->clk_hs_prepare = max(64 / cycle, 1U);
++		timing->clk_hs_post = (96 + 52 * ui) / cycle;
++		timing->clk_hs_trail = max(96 / cycle + 1, 2U);
++		timing->clk_hs_zero = 400 / cycle;
++		timing->clk_hs_exit = 2 * timing->lpx;
++	} else {
++		timing->lpx = (60 * data_rate_mhz / (8 * 1000)) + 1;
++		timing->da_hs_prepare = (80 * data_rate_mhz + 4 * 1000) / 8000;
++		timing->da_hs_zero = (170 * data_rate_mhz + 10 * 1000) / 8000 + 1 -
++				     timing->da_hs_prepare;
++		timing->da_hs_trail = timing->da_hs_prepare + 1;
++
++		timing->ta_go = 4 * timing->lpx - 2;
++		timing->ta_sure = timing->lpx + 2;
++		timing->ta_get = 4 * timing->lpx;
++		timing->da_hs_exit = 2 * timing->lpx + 1;
++
++		timing->clk_hs_prepare = 70 * data_rate_mhz / (8 * 1000);
++		timing->clk_hs_post = timing->clk_hs_prepare + 8;
++		timing->clk_hs_trail = timing->clk_hs_prepare;
++		timing->clk_hs_zero = timing->clk_hs_trail * 4;
++		timing->clk_hs_exit = 2 * timing->clk_hs_trail;
++	}
+ 
+ 	timcon0 = FIELD_PREP(LPX, timing->lpx) |
+ 		  FIELD_PREP(HS_PREP, timing->da_hs_prepare) |
+@@ -427,7 +452,9 @@ static void mtk_dsi_ps_control(struct mtk_dsi *dsi, bool config_vact)
+ 	if (config_vact) {
+ 		vact_nl = FIELD_PREP(VACT_NL, dsi->vm.vactive);
+ 		writel(vact_nl, dsi->regs + DSI_VACT_NL);
+-		writel(ps_wc, dsi->regs + DSI_HSTX_CKL_WC);
++		/* MediaTek LK keeps the clock lane LP word count in hardware auto mode */
++		if (!dsi->driver_data->vendor_timing)
++			writel(ps_wc, dsi->regs + DSI_HSTX_CKL_WC);
+ 	}
+ 	writel(ps_val, dsi->regs + DSI_PSCTRL);
+ }
+@@ -564,6 +591,27 @@ static void mtk_dsi_config_vdo_timing_per_line_lp(struct mtk_dsi *dsi)
+ 	writel(horizontal_frontporch_byte, dsi->regs + DSI_HFP_WC);
+ }
+ 
++/* MediaTek LK: no D-PHY compensation, word counts rounded up to 4 */
++static void mtk_dsi_config_vdo_timing_vendor(struct mtk_dsi *dsi)
++{
++	struct videomode *vm = &dsi->vm;
++	u32 bpp = dsi->format == MIPI_DSI_FMT_RGB565 ? 2 : 3;
++	u32 hsa, hbp, hfp;
++
++	if (dsi->mode_flags & MIPI_DSI_MODE_VIDEO_SYNC_PULSE) {
++		hsa = vm->hsync_len * bpp - 10;
++		hbp = vm->hback_porch * bpp - 10;
++	} else {
++		hsa = vm->hsync_len * bpp - 4;
++		hbp = (vm->hback_porch + vm->hsync_len) * bpp - 10;
++	}
++	hfp = vm->hfront_porch * bpp - 12;
++
++	writel(ALIGN(hsa, 4), dsi->regs + DSI_HSA_WC);
++	writel(ALIGN(hbp, 4), dsi->regs + DSI_HBP_WC);
++	writel(ALIGN(hfp, 4), dsi->regs + DSI_HFP_WC);
++}
++
+ static void mtk_dsi_config_vdo_timing(struct mtk_dsi *dsi)
+ {
+ 	struct videomode *vm = &dsi->vm;
+@@ -580,6 +628,8 @@ static void mtk_dsi_config_vdo_timing(struct mtk_dsi *dsi)
+ 
+ 	if (dsi->driver_data->support_per_frame_lp)
+ 		mtk_dsi_config_vdo_timing_per_frame_lp(dsi);
++	else if (dsi->driver_data->vendor_timing)
++		mtk_dsi_config_vdo_timing_vendor(dsi);
+ 	else
+ 		mtk_dsi_config_vdo_timing_per_line_lp(dsi);
+ 
+@@ -1278,6 +1328,15 @@ static const struct mtk_dsi_driver_data mt2701_dsi_driver_data = {
+ 	.reg_shadow_dbg_off = 0x190
+ };
+ 
++static const struct mtk_dsi_driver_data mt6785_dsi_driver_data = {
++	.reg_cmdq_off = 0x200,
++	.reg_vm_cmd_off = 0x130,
++	.reg_shadow_dbg_off = 0x190,
++	.has_shadow_ctl = true,
++	.has_size_ctl = true,
++	.vendor_timing = true,
++};
++
+ static const struct mtk_dsi_driver_data mt8183_dsi_driver_data = {
+ 	.reg_cmdq_off = 0x200,
+ 	.reg_vm_cmd_off = 0x130,
+@@ -1306,6 +1365,7 @@ static const struct mtk_dsi_driver_data mt8188_dsi_driver_data = {
+ 
+ static const struct of_device_id mtk_dsi_of_match[] = {
+ 	{ .compatible = "mediatek,mt2701-dsi", .data = &mt2701_dsi_driver_data },
++	{ .compatible = "mediatek,mt6785-dsi", .data = &mt6785_dsi_driver_data },
+ 	{ .compatible = "mediatek,mt8173-dsi", .data = &mt8173_dsi_driver_data },
+ 	{ .compatible = "mediatek,mt8183-dsi", .data = &mt8183_dsi_driver_data },
+ 	{ .compatible = "mediatek,mt8186-dsi", .data = &mt8186_dsi_driver_data },
+diff --git a/drivers/phy/mediatek/phy-mtk-mipi-dsi-mt8183.c b/drivers/phy/mediatek/phy-mtk-mipi-dsi-mt8183.c
+--- a/drivers/phy/mediatek/phy-mtk-mipi-dsi-mt8183.c
++++ b/drivers/phy/mediatek/phy-mtk-mipi-dsi-mt8183.c
+@@ -151,7 +151,9 @@ static void mtk_mipi_tx_power_on_signal(struct phy *phy)
+ 	mtk_phy_update_field(base + MIPITX_VOLTAGE_SEL, RG_DSI_HSTX_LDO_REF_SEL,
+ 			     (mipi_tx->mipitx_drive - 3000) / 200);
+ 
+-	mtk_mipi_tx_config_calibration_data(mipi_tx);
++	/* without an efuse cell keep the bootloader's impedance trim */
++	if (memchr_inv(mipi_tx->rt_code, 0, sizeof(mipi_tx->rt_code)))
++		mtk_mipi_tx_config_calibration_data(mipi_tx);
+ 
+ 	mtk_phy_set_bits(base + MIPITX_CK_CKMODE_EN, DSI_CK_CKMODE_EN);
+ }
