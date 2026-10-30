@@ -57,6 +57,12 @@ case ${DEVICE} in
     PKG_URL="https://www.kernel.org/pub/linux/kernel/v${PKG_VERSION/.*/}.x/${PKG_NAME}-${PKG_VERSION}.tar.xz"
     PKG_PATCH_DIRS+=" 7.0"
     ;;
+  MT6785)
+    PKG_VERSION="811c3c80dac368d5722957149e44071716e6ac20"
+    PKG_SHA256="3dc60bed4b5f2a636de080950335d48b577177343323bc2289b699f2fad2b2ad"
+    PKG_URL="https://gitlab.nura.eco/mt6785-mainline/linux/-/archive/${PKG_VERSION}/${PKG_NAME}-${PKG_VERSION}.tar.gz"
+    PKG_PATCH_DIRS+=" 7.0"
+    ;;
   RK3399)
     PKG_VERSION="6.18.54"
     PKG_SHA256="9df30b02dd8102bbd0be52556288ef6889ddbe7f1ddb96fbf847d0becf3eacac"
@@ -90,7 +96,7 @@ for pkg in $(get_pkg_variable initramfs PKG_DEPENDS_TARGET); do
   ! listcontains "${PKG_DEPENDS_TARGET}" "${pkg}" && PKG_DEPENDS_TARGET+=" ${pkg}" || true
 done
 
-if [ "${DEVICE}" = "RK3326" -o "${DEVICE}" = "RK3566" ]; then
+if [ "${DEVICE}" = "RK3326" -o "${DEVICE}" = "RK3566" -o "${DEVICE}" = "MT6785" ]; then
   PKG_DEPENDS_UNPACK+=" generic-dsi"
 elif [ "${DEVICE}" = "SM8250" -o "${DEVICE}" = "H700" -o "${DEVICE}" = "SM8650" -o "${DEVICE}" = "SM8750" -o "${DEVICE}" = "SDM845" ]; then
   PKG_DEPENDS_UNPACK+=" kernel-firmware"
@@ -118,7 +124,7 @@ post_patch() {
     cp -p ${PKG_INSTALL}/.image/Module.symvers ${PKG_BUILD}
   fi
 
-  if [ "${DEVICE}" = "RK3326" -o "${DEVICE}" = "RK3566" -o "${DEVICE}" = "RK3576" ]; then
+  if [ "${DEVICE}" = "RK3326" -o "${DEVICE}" = "RK3566" -o "${DEVICE}" = "RK3576" -o "${DEVICE}" = "MT6785" ]; then
     cp -v $(get_pkg_directory generic-dsi)/sources/panel-generic-dsi.c ${PKG_BUILD}/drivers/gpu/drm/panel/
     echo "obj-y" += panel-generic-dsi.o >> ${PKG_BUILD}/drivers/gpu/drm/panel/Makefile
   fi
