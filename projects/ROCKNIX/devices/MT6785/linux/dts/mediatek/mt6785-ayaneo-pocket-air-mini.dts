@@ -62,9 +62,41 @@
 		default-brightness-level = <1023>;
 	};
 
+	/* fan power (GPIO22) feeds the level shifter enable (GPIO23) */
+	fan_pwr: regulator-fan-pwr {
+		compatible = "regulator-fixed";
+		regulator-name = "fan_pwr";
+		gpio = <&pio 22 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+	};
+
+	fan_shift: regulator-fan-shift {
+		compatible = "regulator-fixed";
+		regulator-name = "fan_shift";
+		gpio = <&pio 23 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		vin-supply = <&fan_pwr>;
+	};
+
+	/* stock 1 kHz PWM, full speed for 50 ms to spin up */
+	fan: pwm-fan {
+		compatible = "pwm-fan";
+		pwms = <&pwm0 0 1000000 0>;
+		fan-supply = <&fan_shift>;
+		interrupts-extended = <&pio 40 IRQ_TYPE_EDGE_FALLING>;
+		pulses-per-revolution = <2>;
+		fan-stop-to-start-percent = <100>;
+		fan-stop-to-start-us = <50000>;
+		#cooling-cells = <2>;
+		cooling-levels = <0 77 128 191 255>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&fan_pins>;
+	};
+
 	/*
 	 * GammaOS: 85 C throttles the CPUs and the GPU, 117 C resets. The VPU
-	 * only gets the critical trip.
+	 * only gets the critical trip. The fan follows the big cluster and the
+	 * GPU from 55 C and is at full speed before either throttles.
 	 */
 	thermal-zones {
 		cpu-big0-thermal {
@@ -73,6 +105,30 @@
 			thermal-sensors = <&lvts MT6785_BIG_CPU0>;
 
 			trips {
+				big0_fan0: trip-fan0 {
+					temperature = <55000>;
+					hysteresis = <5000>;
+					type = "active";
+				};
+
+				big0_fan1: trip-fan1 {
+					temperature = <62000>;
+					hysteresis = <5000>;
+					type = "active";
+				};
+
+				big0_fan2: trip-fan2 {
+					temperature = <69000>;
+					hysteresis = <5000>;
+					type = "active";
+				};
+
+				big0_fan3: trip-fan3 {
+					temperature = <76000>;
+					hysteresis = <5000>;
+					type = "active";
+				};
+
 				big0_alert: trip-alert {
 					temperature = <85000>;
 					hysteresis = <2000>;
@@ -91,6 +147,26 @@
 					trip = <&big0_alert>;
 					cooling-device = <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
 							 <&cpu7 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+
+				map1 {
+					trip = <&big0_fan0>;
+					cooling-device = <&fan 1 1>;
+				};
+
+				map2 {
+					trip = <&big0_fan1>;
+					cooling-device = <&fan 2 2>;
+				};
+
+				map3 {
+					trip = <&big0_fan2>;
+					cooling-device = <&fan 3 3>;
+				};
+
+				map4 {
+					trip = <&big0_fan3>;
+					cooling-device = <&fan 4 4>;
 				};
 			};
 		};
@@ -225,6 +301,30 @@
 			thermal-sensors = <&lvts MT6785_GPU0>;
 
 			trips {
+				gpu0_fan0: trip-fan0 {
+					temperature = <55000>;
+					hysteresis = <5000>;
+					type = "active";
+				};
+
+				gpu0_fan1: trip-fan1 {
+					temperature = <62000>;
+					hysteresis = <5000>;
+					type = "active";
+				};
+
+				gpu0_fan2: trip-fan2 {
+					temperature = <69000>;
+					hysteresis = <5000>;
+					type = "active";
+				};
+
+				gpu0_fan3: trip-fan3 {
+					temperature = <76000>;
+					hysteresis = <5000>;
+					type = "active";
+				};
+
 				gpu0_alert: trip-alert {
 					temperature = <85000>;
 					hysteresis = <2000>;
@@ -242,6 +342,26 @@
 				map0 {
 					trip = <&gpu0_alert>;
 					cooling-device = <&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+
+				map1 {
+					trip = <&gpu0_fan0>;
+					cooling-device = <&fan 1 1>;
+				};
+
+				map2 {
+					trip = <&gpu0_fan1>;
+					cooling-device = <&fan 2 2>;
+				};
+
+				map3 {
+					trip = <&gpu0_fan2>;
+					cooling-device = <&fan 3 3>;
+				};
+
+				map4 {
+					trip = <&gpu0_fan3>;
+					cooling-device = <&fan 4 4>;
 				};
 			};
 		};
@@ -704,6 +824,12 @@
 	status = "okay";
 };
 
+&pwm0 {
+	pinctrl-names = "default";
+	pinctrl-0 = <&pwm0_pins>;
+	status = "okay";
+};
+
 &pwm1 {
 	status = "okay";
 };
@@ -838,6 +964,21 @@
 };
 
 &pio {
+	fan_pins: fan-pins {
+		pins-tach {
+			pinmux = <PINMUX_GPIO40__FUNC_GPIO40>;
+			input-enable;
+			bias-pull-up;
+		};
+	};
+
+	pwm0_pins: pwm0-pins {
+		pins-fan {
+			pinmux = <PINMUX_GPIO26__FUNC_PWM_0>;
+			bias-pull-down;
+		};
+	};
+
 	/* stock drive strength and pulls */
 	mmc1_pins: mmc1-pins {
 		pins-cmd-dat {
