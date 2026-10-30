@@ -52,6 +52,52 @@
 	};
 };
 
+/* A55 cluster and CCI share vproc2, the A76 cluster has vproc1 */
+&cci {
+	proc-supply = <&mt6359_vproc2>;
+	sram-supply = <&mt6359_vsram_proc2>;
+};
+
+&cpu0 {
+	proc-supply = <&mt6359_vproc2>;
+	sram-supply = <&mt6359_vsram_proc2>;
+};
+
+&cpu1 {
+	proc-supply = <&mt6359_vproc2>;
+	sram-supply = <&mt6359_vsram_proc2>;
+};
+
+&cpu2 {
+	proc-supply = <&mt6359_vproc2>;
+	sram-supply = <&mt6359_vsram_proc2>;
+};
+
+&cpu3 {
+	proc-supply = <&mt6359_vproc2>;
+	sram-supply = <&mt6359_vsram_proc2>;
+};
+
+&cpu4 {
+	proc-supply = <&mt6359_vproc2>;
+	sram-supply = <&mt6359_vsram_proc2>;
+};
+
+&cpu5 {
+	proc-supply = <&mt6359_vproc2>;
+	sram-supply = <&mt6359_vsram_proc2>;
+};
+
+&cpu6 {
+	proc-supply = <&mt6359_vproc1>;
+	sram-supply = <&mt6359_vsram_proc1>;
+};
+
+&cpu7 {
+	proc-supply = <&mt6359_vproc1>;
+	sram-supply = <&mt6359_vsram_proc1>;
+};
+
 /*
  * No rtc/codec/adc node. Leave power-off-time-sec / long-press-mode out:
  * mainline's MT6359_TOP_RST_MISC (0x14c) is the vendor's TOP_RST_MISC_SET, so
@@ -71,11 +117,44 @@
 		};
 
 		/*
-		 * Only rails with a consumer, pinned to what GammaOS runs and never
-		 * switched off. Everything else (vproc*, vsram*, vcore, vgpu11,
-		 * vmodem, ...) stays undescribed so the kernel cannot touch it.
+		 * Only rails with a consumer, never switched off. Everything else
+		 * (vcore, vgpu11, vsram_others, vmodem, ...) stays undescribed so
+		 * the kernel cannot touch it.
 		 */
 		regulators {
+			/* CPU rails span the mt6785.dtsi OPPs, vsram tracks vproc + 100 mV as stock */
+			mt6359_vproc1: buck_vproc1 {
+				regulator-name = "vproc1";
+				regulator-min-microvolt = <675000>;
+				regulator-max-microvolt = <1118750>;
+				regulator-ramp-delay = <7500>;
+				regulator-always-on;
+			};
+
+			mt6359_vproc2: buck_vproc2 {
+				regulator-name = "vproc2";
+				regulator-min-microvolt = <600000>;
+				regulator-max-microvolt = <1031250>;
+				regulator-ramp-delay = <7500>;
+				regulator-always-on;
+			};
+
+			mt6359_vsram_proc1: ldo_vsram_proc1 {
+				regulator-name = "vsram_proc1";
+				regulator-min-microvolt = <850000>;
+				regulator-max-microvolt = <1118750>;
+				regulator-ramp-delay = <7500>;
+				regulator-always-on;
+			};
+
+			mt6359_vsram_proc2: ldo_vsram_proc2 {
+				regulator-name = "vsram_proc2";
+				regulator-min-microvolt = <850000>;
+				regulator-max-microvolt = <1118750>;
+				regulator-ramp-delay = <7500>;
+				regulator-always-on;
+			};
+
 			mt6359_vemc: ldo_vemc {
 				regulator-name = "vemc";
 				regulator-min-microvolt = <3000000>;
