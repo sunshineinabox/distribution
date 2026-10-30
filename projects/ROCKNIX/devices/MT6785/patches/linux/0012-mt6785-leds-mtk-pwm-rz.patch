@@ -1,0 +1,372 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Thu, 30 Oct 2026 21:20:00 +0000
+Subject: [PATCH] leds: rgb: add WS2812-style chains on the MediaTek PWM
+
+Drive the WS2812-style LED rings around the Pocket Air Mini sticks from
+the MediaTek PWM memory mode, one RGB multicolor LED per chain. The PWM
+block stays with pwm-mediatek for the fan, so map it without claiming it.
+---
+diff --git a/drivers/leds/rgb/Kconfig b/drivers/leds/rgb/Kconfig
+index 28ef4c487..a501aa421 100644
+--- a/drivers/leds/rgb/Kconfig
++++ b/drivers/leds/rgb/Kconfig
+@@ -75,6 +75,18 @@ config LEDS_QCOM_LPG
+ 
+ 	  If compiled as a module, the module will be named leds-qcom-lpg.
+ 
++config LEDS_MTK_PWM_RZ
++	tristate "LED support for WS2812-style chains on the MediaTek PWM"
++	depends on ARCH_MEDIATEK || COMPILE_TEST
++	depends on HAS_DMA && OF
++	help
++	  Say Y here to drive chains of WS2812-style RGB LEDs from the
++	  memory mode of the MediaTek PWM controller, as found on the
++	  stick rings of the AYANEO Pocket Air Mini.
++
++	  This driver can also be built as a module. If so, the module
++	  will be called leds-mtk-pwm-rz.
++
+ config LEDS_MT6370_RGB
+ 	tristate "LED Support for MediaTek MT6370 PMIC"
+ 	depends on MFD_MT6370
+diff --git a/drivers/leds/rgb/Makefile b/drivers/leds/rgb/Makefile
+index be45991f6..626b14b46 100644
+--- a/drivers/leds/rgb/Makefile
++++ b/drivers/leds/rgb/Makefile
+@@ -6,4 +6,5 @@ obj-$(CONFIG_LEDS_LP5812)		+= leds-lp5812.o
+ obj-$(CONFIG_LEDS_NCP5623)		+= leds-ncp5623.o
+ obj-$(CONFIG_LEDS_PWM_MULTICOLOR)	+= leds-pwm-multicolor.o
+ obj-$(CONFIG_LEDS_QCOM_LPG)		+= leds-qcom-lpg.o
++obj-$(CONFIG_LEDS_MTK_PWM_RZ)		+= leds-mtk-pwm-rz.o
+ obj-$(CONFIG_LEDS_MT6370_RGB)		+= leds-mt6370-rgb.o
+diff --git a/drivers/leds/rgb/leds-mtk-pwm-rz.c b/drivers/leds/rgb/leds-mtk-pwm-rz.c
+new file mode 100644
+index 000000000..23fe2f962
+--- /dev/null
++++ b/drivers/leds/rgb/leds-mtk-pwm-rz.c
+@@ -0,0 +1,325 @@
++// SPDX-License-Identifier: GPL-2.0-only
++/*
++ * WS2812-style RGB LED chains driven by the MediaTek PWM memory mode
++ *
++ * Each data bit is four PWM slots, 1000 for 0 and 1110 for 1. Register
++ * layout from the MediaTek PWM HAL, timing from the vendor driver.
++ */
++
++#include <linux/bitfield.h>
++#include <linux/clk.h>
++#include <linux/delay.h>
++#include <linux/dma-mapping.h>
++#include <linux/gpio/consumer.h>
++#include <linux/io.h>
++#include <linux/led-class-multicolor.h>
++#include <linux/math64.h>
++#include <linux/module.h>
++#include <linux/mutex.h>
++#include <linux/of.h>
++#include <linux/platform_device.h>
++#include <linux/spinlock.h>
++
++#define PWM_EN			0x000
++#define PWM_CHAN(n)		(0x010 + (n) * 0x40)
++
++#define PWM_CON			0x00
++#define  PWM_CON_SRCSEL_MEM	BIT(5)
++#define  PWM_CON_STOP_BITS	GENMASK(13, 9)
++#define PWM_HDURATION		0x04
++#define PWM_LDURATION		0x08
++#define PWM_GDURATION		0x0c
++#define PWM_BUF0_ADDR		0x10
++#define PWM_BUF0_SIZE		0x14
++#define PWM_WAVE_NUM		0x28
++#define PWM_BUF_ADDR_HI		0x3c
++
++#define RZ_MAX_CHANNELS		4
++#define RZ_SLOT_HZ		3200000	/* 312.5 ns slots */
++#define RZ_RESET_US		80
++
++struct rz_leds;
++
++struct rz_chain {
++	struct rz_leds *priv;
++	struct led_classdev_mc mc;
++	struct mc_subled subled[3];
++	struct clk *clk;
++	unsigned int chan;
++	unsigned int num_leds;
++	unsigned int xfer_us;
++	u32 dur;
++	u32 *buf;
++	dma_addr_t dma;
++	bool lit;
++};
++
++struct rz_leds {
++	struct device *dev;
++	void __iomem *base;
++	struct gpio_desc *power;
++	struct gpio_desc *enable;
++	struct mutex lock;
++	spinlock_t en_lock;	/* PWM_EN is shared with the other channels */
++	struct rz_chain chains[RZ_MAX_CHANNELS];
++	unsigned int num_chains;
++	bool powered;
++};
++
++/* MSB first: bit 7 goes out first, from the lowest nibble */
++static u32 rz_encode(u8 val)
++{
++	u32 word = 0;
++	int i;
++
++	for (i = 0; i < 8; i++)
++		word |= (val & BIT(7 - i) ? 0x7 : 0x1) << (4 * i);
++
++	return word;
++}
++
++static void rz_set_enable(struct rz_leds *priv, unsigned int chan, bool on)
++{
++	unsigned long flags;
++	u32 val;
++
++	spin_lock_irqsave(&priv->en_lock, flags);
++	val = readl(priv->base + PWM_EN);
++	if (on)
++		val |= BIT(chan);
++	else
++		val &= ~BIT(chan);
++	writel(val, priv->base + PWM_EN);
++	spin_unlock_irqrestore(&priv->en_lock, flags);
++}
++
++static int rz_send(struct rz_chain *ch)
++{
++	struct rz_leds *priv = ch->priv;
++	void __iomem *reg = priv->base + PWM_CHAN(ch->chan);
++	int ret;
++
++	ret = clk_prepare_enable(ch->clk);
++	if (ret)
++		return ret;
++
++	writel(PWM_CON_SRCSEL_MEM | FIELD_PREP(PWM_CON_STOP_BITS, 31),
++	       reg + PWM_CON);
++	writel(ch->dur, reg + PWM_HDURATION);
++	writel(ch->dur, reg + PWM_LDURATION);
++	writel(0, reg + PWM_GDURATION);
++	writel(lower_32_bits(ch->dma), reg + PWM_BUF0_ADDR);
++	writel(upper_32_bits(ch->dma) & 0xf, reg + PWM_BUF_ADDR_HI);
++	writel(ch->num_leds * 3, reg + PWM_BUF0_SIZE);
++	writel(1, reg + PWM_WAVE_NUM);
++
++	rz_set_enable(priv, ch->chan, true);
++	/* one pass of the buffer, then the line idles low to latch */
++	usleep_range(ch->xfer_us, ch->xfer_us + 100);
++	rz_set_enable(priv, ch->chan, false);
++
++	clk_disable_unprepare(ch->clk);
++
++	return 0;
++}
++
++static void rz_fill(struct rz_chain *ch, u8 r, u8 g, u8 b)
++{
++	unsigned int i;
++
++	for (i = 0; i < ch->num_leds; i++) {
++		ch->buf[3 * i] = rz_encode(g);
++		ch->buf[3 * i + 1] = rz_encode(r);
++		ch->buf[3 * i + 2] = rz_encode(b);
++	}
++}
++
++static void rz_power(struct rz_leds *priv, bool on)
++{
++	if (priv->powered == on)
++		return;
++
++	gpiod_set_value_cansleep(priv->enable, on);
++	gpiod_set_value_cansleep(priv->power, on);
++	priv->powered = on;
++	if (on)
++		usleep_range(1000, 2000);
++}
++
++static int rz_brightness_set(struct led_classdev *cdev,
++			     enum led_brightness brightness)
++{
++	struct led_classdev_mc *mc = lcdev_to_mccdev(cdev);
++	struct rz_chain *ch = container_of(mc, struct rz_chain, mc);
++	struct rz_leds *priv = ch->priv;
++	bool any = false;
++	unsigned int i;
++	int ret;
++
++	led_mc_calc_color_components(mc, brightness);
++
++	mutex_lock(&priv->lock);
++
++	ch->lit = ch->subled[0].brightness || ch->subled[1].brightness ||
++		  ch->subled[2].brightness;
++	for (i = 0; i < priv->num_chains; i++)
++		any |= priv->chains[i].lit;
++
++	if (any)
++		rz_power(priv, true);
++
++	rz_fill(ch, ch->subled[0].brightness, ch->subled[1].brightness,
++		ch->subled[2].brightness);
++	ret = priv->powered ? rz_send(ch) : 0;
++
++	if (!any)
++		rz_power(priv, false);
++
++	mutex_unlock(&priv->lock);
++
++	return ret;
++}
++
++static int rz_probe_chain(struct rz_leds *priv, struct device_node *np,
++			  struct rz_chain *ch)
++{
++	struct device *dev = priv->dev;
++	struct led_init_data init_data = {};
++	unsigned long rate;
++	char name[8];
++	int ret;
++
++	ret = of_property_read_u32(np, "reg", &ch->chan);
++	if (ret || ch->chan >= RZ_MAX_CHANNELS)
++		return dev_err_probe(dev, -EINVAL, "%pOF: bad PWM channel\n", np);
++
++	ret = of_property_read_u32(np, "mediatek,num-leds", &ch->num_leds);
++	if (ret || !ch->num_leds || ch->num_leds > 64)
++		return dev_err_probe(dev, -EINVAL, "%pOF: bad LED count\n", np);
++
++	snprintf(name, sizeof(name), "pwm%u", ch->chan + 1);
++	ch->clk = devm_clk_get(dev, name);
++	if (IS_ERR(ch->clk))
++		return dev_err_probe(dev, PTR_ERR(ch->clk), "no %s clock\n", name);
++
++	rate = clk_get_rate(ch->clk);
++	ch->dur = DIV_ROUND_CLOSEST(rate, RZ_SLOT_HZ);
++	if (ch->dur < 2 || ch->dur > 0x10000)
++		return dev_err_probe(dev, -EINVAL, "%s rate %lu unusable\n", name, rate);
++	ch->dur--;
++
++	/* 24 bits of 4 slots per LED */
++	ch->xfer_us = DIV_ROUND_UP_ULL((u64)ch->num_leds * 96 * (ch->dur + 1) *
++				       1000000, rate) + RZ_RESET_US;
++
++	ch->buf = dmam_alloc_coherent(dev, ch->num_leds * 3 * sizeof(u32),
++				      &ch->dma, GFP_KERNEL);
++	if (!ch->buf)
++		return -ENOMEM;
++
++	ch->priv = priv;
++	ch->subled[0].color_index = LED_COLOR_ID_RED;
++	ch->subled[1].color_index = LED_COLOR_ID_GREEN;
++	ch->subled[2].color_index = LED_COLOR_ID_BLUE;
++	ch->mc.subled_info = ch->subled;
++	ch->mc.num_colors = ARRAY_SIZE(ch->subled);
++	ch->mc.led_cdev.max_brightness = LED_FULL;
++	ch->mc.led_cdev.brightness_set_blocking = rz_brightness_set;
++
++	init_data.fwnode = of_fwnode_handle(np);
++	ret = devm_led_classdev_multicolor_register_ext(dev, &ch->mc, &init_data);
++	if (ret)
++		return dev_err_probe(dev, ret, "%pOF: LED register failed\n", np);
++
++	dev_info(dev, "pwm%u: %u LEDs, %lu Hz, %u clocks per slot\n",
++		 ch->chan + 1, ch->num_leds, rate, ch->dur + 1);
++
++	return 0;
++}
++
++static void rz_power_off(void *data)
++{
++	struct rz_leds *priv = data;
++
++	mutex_lock(&priv->lock);
++	rz_power(priv, false);
++	mutex_unlock(&priv->lock);
++}
++
++static int rz_probe(struct platform_device *pdev)
++{
++	struct device *dev = &pdev->dev;
++	struct rz_leds *priv;
++	struct resource *res;
++	struct clk *clk;
++	int ret;
++
++	priv = devm_kzalloc(dev, sizeof(*priv), GFP_KERNEL);
++	if (!priv)
++		return -ENOMEM;
++
++	priv->dev = dev;
++	mutex_init(&priv->lock);
++	spin_lock_init(&priv->en_lock);
++
++	/* the PWM block is shared with pwm-mediatek: map it, do not claim it */
++	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (!res)
++		return -EINVAL;
++	priv->base = devm_ioremap(dev, res->start, resource_size(res));
++	if (!priv->base)
++		return -ENOMEM;
++
++	clk = devm_clk_get_enabled(dev, "top");
++	if (IS_ERR(clk))
++		return dev_err_probe(dev, PTR_ERR(clk), "no top clock\n");
++
++	clk = devm_clk_get_enabled(dev, "main");
++	if (IS_ERR(clk))
++		return dev_err_probe(dev, PTR_ERR(clk), "no main clock\n");
++
++	priv->power = devm_gpiod_get(dev, "power", GPIOD_OUT_LOW);
++	if (IS_ERR(priv->power))
++		return dev_err_probe(dev, PTR_ERR(priv->power), "power GPIO\n");
++
++	priv->enable = devm_gpiod_get(dev, "enable", GPIOD_OUT_LOW);
++	if (IS_ERR(priv->enable))
++		return dev_err_probe(dev, PTR_ERR(priv->enable), "enable GPIO\n");
++
++	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
++	if (ret)
++		return ret;
++
++	ret = devm_add_action_or_reset(dev, rz_power_off, priv);
++	if (ret)
++		return ret;
++
++	for_each_available_child_of_node_scoped(dev->of_node, np) {
++		if (priv->num_chains == RZ_MAX_CHANNELS)
++			break;
++		ret = rz_probe_chain(priv, np, &priv->chains[priv->num_chains]);
++		if (ret)
++			return ret;
++		priv->num_chains++;
++	}
++
++	return 0;
++}
++
++static const struct of_device_id rz_of_match[] = {
++	{ .compatible = "mediatek,mt6785-pwm-rz-leds" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, rz_of_match);
++
++static struct platform_driver rz_driver = {
++	.probe = rz_probe,
++	.driver = {
++		.name = "leds-mtk-pwm-rz",
++		.of_match_table = rz_of_match,
++	},
++};
++module_platform_driver(rz_driver);
++
++MODULE_DESCRIPTION("MediaTek PWM memory mode WS2812-style LED driver");
++MODULE_LICENSE("GPL");
