@@ -57,6 +57,7 @@ struct generic_panel_mode {
 };
 
 #define DCS_PSEUDO_CMD_SEQ 0x10000
+#define DCS_PSEUDO_CMD_GEN 0x20000
 struct generic_panel_init_seq {
     int dcs;
     int len;
@@ -212,6 +213,15 @@ int load_init_seq(char *data, struct mipi_dsi_device *dsi, struct generic_panel 
                 return -1;
             }
             dev_dbg(dev, "loaded seq len=%d %s\n", item->len, val);
+        } else if (strcmp(param, "gen") == 0) {
+            item->dcs = DCS_PSEUDO_CMD_GEN;
+            item->len = (strlen(val)) >> 1;
+            item->data = devm_kzalloc(dev, item->len, GFP_KERNEL);
+            if (hex2bin(item->data, val, item->len) != 0) {
+                dev_info(dev, "bad gen %s\n", val);
+                return -1;
+            }
+            dev_dbg(dev, "loaded gen len=%d %s\n", item->len, val);
         } else if (strcmp(param, "read") == 0) {
             item->read = simple_strtoul(val, NULL, 16);
         } else if (strcmp(param, "wait") == 0) {
@@ -374,6 +384,9 @@ static int generic_panel_init_sequence(struct generic_panel *ctx)
         } else if (iseq->dcs == DCS_PSEUDO_CMD_SEQ) {
             ret = mipi_dsi_dcs_write_buffer(dsi, iseq->data, iseq->len);
             dev_dbg(dev, "iseq 0x%px len=%d -> %d\n", (void*)iseq, iseq->len, ret);
+        } else if (iseq->dcs == DCS_PSEUDO_CMD_GEN) {
+            ret = mipi_dsi_generic_write(dsi, iseq->data, iseq->len);
+            dev_dbg(dev, "iseq gen 0x%px len=%d -> %d\n", (void*)iseq, iseq->len, ret);
         } else {
             ret = mipi_dsi_dcs_write(dsi, iseq->dcs, iseq->data, iseq->len);
             dev_dbg(dev, "iseq %02x len=%d -> %d\n", iseq->dcs, iseq->len, ret);
