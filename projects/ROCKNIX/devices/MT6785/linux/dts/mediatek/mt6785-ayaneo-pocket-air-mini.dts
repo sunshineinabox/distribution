@@ -1079,6 +1079,26 @@
 	};
 };
 
+&i2c0 {
+	clock-frequency = <400000>;
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c0_pins>;
+	status = "okay";
+
+	/* no axis swap, as stock */
+	touchscreen@5a {
+		compatible = "hynitron,cst66xx";
+		reg = <0x5a>;
+		interrupts-extended = <&pio 1 IRQ_TYPE_EDGE_FALLING>;
+		reset-gpios = <&pio 2 GPIO_ACTIVE_LOW>;
+		vdd-supply = <&mt6360_vtp>;
+		touchscreen-size-x = <1280>;
+		touchscreen-size-y = <960>;
+		pinctrl-names = "default";
+		pinctrl-0 = <&touch_pins>;
+	};
+};
+
 /* pins already muxed by LK, which drives the MT6360 itself */
 &i2c5 {
 	clock-frequency = <400000>;
@@ -1097,16 +1117,19 @@
 			/* arm the vendor power-off sequence before power-off (patches/0001) */
 			mediatek,poweroff-sequence;
 
-			/*
-			 * buck2/ldo6/ldo7 feed DRAM and ldo2 the touch panel: left
-			 * undescribed so the kernel cannot touch them. VMC is capped at
-			 * the 3.0 V GammaOS uses; no UHS, so it never goes to 1.8 V.
-			 */
-			/* VFP: the gamepad's vcc3v3, mtk-gamepad sets 3.3 V */
+			/* buck2/ldo6/ldo7 feed DRAM and stay undescribed */
+			/* VFP: the gamepad's vcc3v3 */
 			mt6360_vfp: ldo1 {
 				regulator-name = "vfp";
 				regulator-min-microvolt = <3300000>;
 				regulator-max-microvolt = <3300000>;
+			};
+
+			/* VTP: the touch controller's vtouch, 2.8 V as stock */
+			mt6360_vtp: ldo2 {
+				regulator-name = "vtp";
+				regulator-min-microvolt = <2800000>;
+				regulator-max-microvolt = <2800000>;
 			};
 
 			mt6360_vmc: ldo3 {
@@ -1223,6 +1246,27 @@
 				 <PINMUX_GPIO58__FUNC_GPIO58>;
 			input-enable;
 			bias-pull-up = <MTK_PUPD_SET_R1R0_01>;
+		};
+	};
+
+	i2c0_pins: i2c0-pins {
+		pins-bus {
+			pinmux = <PINMUX_GPIO51__FUNC_SCL0>,
+				 <PINMUX_GPIO52__FUNC_SDA0>;
+			bias-pull-up;
+		};
+	};
+
+	touch_pins: touch-pins {
+		pins-irq {
+			pinmux = <PINMUX_GPIO1__FUNC_GPIO1>;
+			input-enable;
+			bias-pull-up;
+		};
+
+		pins-reset {
+			pinmux = <PINMUX_GPIO2__FUNC_GPIO2>;
+			output-high;
 		};
 	};
 
