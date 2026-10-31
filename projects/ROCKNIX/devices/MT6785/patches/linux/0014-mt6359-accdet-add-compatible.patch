@@ -1,0 +1,34 @@
+From: Nícolas F. R. A. Prado <nfraprado@collabora.com>
+Date: Wed, 5 Mar 2025 10:58:18 -0800
+Subject: [PATCH] ASoC: mediatek: mt6359-accdet: Add compatible property
+
+Add a compatible property and add it to the module device table for the
+mt6359-accdet platform driver to allow automatic module loading and
+probing when the compatible is present in DT.
+
+Link: https://lore.kernel.org/all/20250305-mt6359-accdet-dts-v4-3-e5ffa5ee9991@collabora.com/
+---
+ sound/soc/codecs/mt6359-accdet.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
+
+diff --git a/sound/soc/codecs/mt6359-accdet.c b/sound/soc/codecs/mt6359-accdet.c
+index ed34cc15b80e856356c07fd53af22207124e0d19..9bbd4497e8d481ee125693be2fc576b439574b39 100644
+--- a/sound/soc/codecs/mt6359-accdet.c
++++ b/sound/soc/codecs/mt6359-accdet.c
+@@ -1047,9 +1047,16 @@ static int mt6359_accdet_probe(struct platform_device *pdev)
+ 	return ret;
+ }
+
++const struct of_device_id accdet_of_match[] = {
++	{ .compatible = "mediatek,mt6359-accdet", },
++	{ /* sentinel */ },
++};
++MODULE_DEVICE_TABLE(of, accdet_of_match);
++
+ static struct platform_driver mt6359_accdet_driver = {
+ 	.driver = {
+ 		.name = "pmic-codec-accdet",
++		.of_match_table = accdet_of_match,
+ 	},
+ 	.probe = mt6359_accdet_probe,
+ };
