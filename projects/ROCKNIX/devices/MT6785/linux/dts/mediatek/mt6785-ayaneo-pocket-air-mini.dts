@@ -402,6 +402,51 @@
 	 * only gets the critical trip. The fan follows the big cluster and the
 	 * GPU from 55 C and is at full speed before either throttles.
 	 */
+	/* GammaOS ext_spk_control: two amps on the MT6359 line out */
+	speaker_amp1: audio-amplifier-1 {
+		compatible = "simple-audio-amplifier";
+		enable-gpios = <&pio 24 GPIO_ACTIVE_HIGH>;
+		sound-name-prefix = "Speaker 1";
+	};
+
+	speaker_amp2: audio-amplifier-2 {
+		compatible = "simple-audio-amplifier";
+		enable-gpios = <&pio 21 GPIO_ACTIVE_HIGH>;
+		sound-name-prefix = "Speaker 2";
+	};
+
+	sound {
+		compatible = "mediatek,mt6785-mt6359-sound";
+		model = "PocketAirMini";
+		mediatek,platform = <&afe>;
+		mediatek,accdet = <&accdet>;
+		aux-devs = <&speaker_amp1>, <&speaker_amp2>;
+		audio-routing =
+			"Headphone Jack", "Headphone L",
+			"Headphone Jack", "Headphone R",
+			"Speaker 1 INL", "LINEOUT L",
+			"Speaker 2 INL", "LINEOUT L",
+			"Speakers", "Speaker 1 OUTL",
+			"Speakers", "Speaker 2 OUTL",
+			"AIN0", "Internal Mic",
+			"AIN1", "Headset Mic";
+		pinctrl-names = "aud_clk_mosi_off", "aud_clk_mosi_on",
+				"aud_dat_mosi_off", "aud_dat_mosi_on",
+				"aud_dat_miso_off", "aud_dat_miso_on",
+				"aud_dat_mosi_ch34_off", "aud_dat_mosi_ch34_on",
+				"aud_dat_miso_ch34_off", "aud_dat_miso_ch34_on";
+		pinctrl-0 = <&aud_clk_mosi_off_pins>;
+		pinctrl-1 = <&aud_clk_mosi_on_pins>;
+		pinctrl-2 = <&aud_dat_mosi_off_pins>;
+		pinctrl-3 = <&aud_dat_mosi_on_pins>;
+		pinctrl-4 = <&aud_dat_miso_off_pins>;
+		pinctrl-5 = <&aud_dat_miso_on_pins>;
+		pinctrl-6 = <&aud_dat_mosi_ch34_off_pins>;
+		pinctrl-7 = <&aud_dat_mosi_ch34_on_pins>;
+		pinctrl-8 = <&aud_dat_miso_ch34_off_pins>;
+		pinctrl-9 = <&aud_dat_miso_ch34_on_pins>;
+	};
+
 	thermal-zones {
 		battery-thermal {
 			polling-delay-passive = <0>;
@@ -901,6 +946,22 @@
 			};
 		};
 
+		/* the MT6359 codec driver only probes with this node */
+		audio-codec {
+		};
+
+		/* stock accdet settings, 3-key headset on PMIC EINT0 */
+		accdet: accdet {
+			compatible = "mediatek,mt6359-accdet";
+			mediatek,mic-vol = <8>;
+			mediatek,plugout-debounce = <1>;
+			mediatek,mic-mode = <2>;
+			mediatek,pwm-deb-setting = <0x500 0x500 1 0x1f0 0x800 0x800 0x20 0x44
+						    4 1 5 3 3 5 0xe>;
+			mediatek,eint-use-ext-res = <0>;
+			mediatek,three-key-thr = <0 80 220 400>;
+		};
+
 		mt6359_auxadc: adc {
 			compatible = "mediatek,mt6359-auxadc";
 			#io-channel-cells = <1>;
@@ -922,22 +983,80 @@
 };
 
 /*
- * scpsys powers every domain on at probe and fails as a whole if one does not
- * come up. MD has no modem rails here (power-on times out); audio has no
- * users yet; CONN must come up after its rails, so the CONNSYS driver
- * sequences it. MM and its CAM/ISP/VDEC/VENC subdomains stay: the M4U waits
- * for all of their larbs.
+ * scpsys fails as a whole if one domain does not power on. MD has no modem
+ * rails and CONN is sequenced by the CONNSYS driver; the M4U needs the rest.
  */
-&{/soc/syscon@10006000/power-controller/power-domain@0} {
-	status = "disabled";
-};
-
 &{/soc/syscon@10006000/power-controller/power-domain@2} {
 	status = "disabled";
 };
 
 &{/soc/syscon@10006000/power-controller/power-domain@4} {
 	status = "disabled";
+};
+
+&audsys {
+	afe: audio-controller {
+		compatible = "mediatek,mt6785-audio";
+		interrupts = <GIC_SPI 184 IRQ_TYPE_LEVEL_LOW>;
+		resets = <&watchdog MT6785_TOPRGU_AUDIO_RST>;
+		reset-names = "audiosys";
+		mediatek,topckgen = <&topckgen>;
+		power-domains = <&spm MT6785_POWER_DOMAIN_AUDIO>;
+		clocks = <&audsys CLK_AUD_AFE>,
+			 <&audsys CLK_AUD_DAC>,
+			 <&audsys CLK_AUD_DAC_PREDIS>,
+			 <&audsys CLK_AUD_ADC>,
+			 <&audsys CLK_AUD_ADDA6_ADC>,
+			 <&audsys CLK_AUD_22M>,
+			 <&audsys CLK_AUD_24M>,
+			 <&audsys CLK_AUD_APLL_TUNER>,
+			 <&audsys CLK_AUD_APLL2_TUNER>,
+			 <&audsys CLK_AUD_TML>,
+			 <&audsys CLK_AUD_NLE>,
+			 <&audsys CLK_AUD_3RD_DAC>,
+			 <&audsys CLK_AUD_3RD_DAC_PREDIS>,
+			 <&infracfg CLK_INFRA_AUDIO>,
+			 <&infracfg CLK_INFRA_AUDIO_26M>,
+			 <&topckgen CLK_TOP_AUDIO>,
+			 <&topckgen CLK_TOP_AUDIO_INTBUS>,
+			 <&topckgen CLK_TOP_AUDIO1>,
+			 <&apmixedsys CLK_APMIXED_APLL1>,
+			 <&topckgen CLK_TOP_AUDIO2>,
+			 <&apmixedsys CLK_APMIXED_APLL2>,
+			 <&topckgen CLK_TOP_AUDIO_ENG1>,
+			 <&topckgen CLK_TOP_APLL1_D8>,
+			 <&topckgen CLK_TOP_AUDIO_ENG2>,
+			 <&topckgen CLK_TOP_APLL2_D8>,
+			 <&topckgen CLK_TOP_AUDIO_HIRES>,
+			 <&clk26m>;
+		clock-names = "aud_afe_clk",
+			      "aud_dac_clk",
+			      "aud_dac_predis_clk",
+			      "aud_adc_clk",
+			      "aud_adda6_adc_clk",
+			      "aud_apll22m_clk",
+			      "aud_apll24m_clk",
+			      "aud_apll1_tuner_clk",
+			      "aud_apll2_tuner_clk",
+			      "aud_tml_clk",
+			      "aud_nle",
+			      "aud_3rd_dac_clk",
+			      "aud_3rd_dac_predis_clk",
+			      "aud_infra_clk",
+			      "aud_infra_26m_clk",
+			      "top_mux_audio",
+			      "top_mux_audio_int",
+			      "top_mux_aud_1",
+			      "top_apll1_ck",
+			      "top_mux_aud_2",
+			      "top_apll2_ck",
+			      "top_mux_aud_eng1",
+			      "top_apll1_d8",
+			      "top_mux_aud_eng2",
+			      "top_apll2_d8",
+			      "top_mux_audio_h",
+			      "top_clk26m_clk";
+	};
 };
 
 &mfg_async {
@@ -1532,6 +1651,93 @@
 };
 
 &pio {
+	/* MT6359 mtkaif: GPIO with pull-down when idle, as stock */
+	aud_clk_mosi_off_pins: aud-clk-mosi-off-pins {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO189__FUNC_GPIO189>,
+				 <PINMUX_GPIO190__FUNC_GPIO190>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+
+	aud_clk_mosi_on_pins: aud-clk-mosi-on-pins {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO189__FUNC_AUD_CLK_MOSI>,
+				 <PINMUX_GPIO190__FUNC_AUD_SYNC_MOSI>;
+			input-schmitt-enable;
+			bias-disable;
+		};
+	};
+
+	aud_dat_mosi_off_pins: aud-dat-mosi-off-pins {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO191__FUNC_GPIO191>,
+				 <PINMUX_GPIO192__FUNC_GPIO192>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+
+	aud_dat_mosi_on_pins: aud-dat-mosi-on-pins {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO191__FUNC_AUD_DAT_MOSI0>,
+				 <PINMUX_GPIO192__FUNC_AUD_DAT_MOSI1>;
+			input-schmitt-enable;
+			bias-disable;
+		};
+	};
+
+	aud_dat_miso_off_pins: aud-dat-miso-off-pins {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO193__FUNC_GPIO193>,
+				 <PINMUX_GPIO194__FUNC_GPIO194>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+
+	aud_dat_miso_on_pins: aud-dat-miso-on-pins {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO193__FUNC_AUD_DAT_MISO0>,
+				 <PINMUX_GPIO194__FUNC_AUD_DAT_MISO1>;
+			input-schmitt-enable;
+			bias-disable;
+		};
+	};
+
+	aud_dat_mosi_ch34_off_pins: aud-dat-mosi-ch34-off-pins {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO143__FUNC_GPIO143>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+
+	aud_dat_mosi_ch34_on_pins: aud-dat-mosi-ch34-on-pins {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO143__FUNC_AUD_DAT_MOSI2>;
+			input-schmitt-enable;
+			bias-disable;
+		};
+	};
+
+	aud_dat_miso_ch34_off_pins: aud-dat-miso-ch34-off-pins {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO146__FUNC_GPIO146>;
+			input-enable;
+			bias-pull-down;
+		};
+	};
+
+	aud_dat_miso_ch34_on_pins: aud-dat-miso-ch34-on-pins {
+		pins-cmd-dat {
+			pinmux = <PINMUX_GPIO146__FUNC_AUD_DAT_MISO2>;
+			input-schmitt-enable;
+			bias-disable;
+		};
+	};
+
 	/* stock pulls */
 	gamepad_key_pins: gamepad-key-pins {
 		pins-keys {
