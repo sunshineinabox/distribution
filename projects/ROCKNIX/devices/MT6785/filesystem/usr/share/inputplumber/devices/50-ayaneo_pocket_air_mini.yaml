@@ -27,4 +27,4 @@ source_devices:
     capability_map_id: ayaneo_pocket_air_mini
 
 target_devices:
-  - xbox-elite
+  - ds5
