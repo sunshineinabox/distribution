@@ -2,8 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright (C) 2026 ROCKNIX (https://github.com/ROCKNIX)
 
-# No WiFi yet: start in USB network mode so the device is reachable over SSH.
-# Runs before the common 081-usbgadget and keeps any mode set since.
+# Default to USB networking for SSH access, ahead of the common 081-usbgadget
 CONF=/storage/.cache/usbgadget/usbgadget.conf
 
 if [ ! -s "${CONF}" ]; then
