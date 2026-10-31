@@ -8,6 +8,14 @@ PKG_SHA256="89d4c3bf09fac8968f4198d00a6328e5e0df02f18d4b17b8eedc6b1a5773ae6b"
 PKG_LICENSE="OSS"
 PKG_SITE="http://www.mesa3d.org/"
 PKG_URL="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-${PKG_VERSION}/mesa-mesa-${PKG_VERSION}.tar.gz"
+
+case ${DEVICE} in
+  MT6785)
+    PKG_VERSION="44989e5a489c0ddbc79d2019f2c236699251c69e"
+    PKG_SHA256="2a7f6c0646d4771838d37da14b745841b91ef89105da1da0e2c023e816ce9bc1"
+    PKG_URL="https://gitlab.freedesktop.org/mesa/mesa/-/archive/${PKG_VERSION}/mesa-${PKG_VERSION}.tar.gz"
+    ;;
+esac
 PKG_DEPENDS_HOST="toolchain:host expat:host libclc:host libdrm:host llvm:host Mako:host pyyaml:host spirv-tools:host"
 PKG_DEPENDS_TARGET="toolchain expat libdrm Mako:host pyyaml:host"
 PKG_LONGDESC="Mesa is a 3-D graphics library with an API."
@@ -101,6 +109,11 @@ if [ "${VULKAN_SUPPORT}" = "yes" ]; then
   PKG_MESON_OPTS_TARGET+=" -Dvulkan-drivers=${VULKAN_DRIVERS_MESA// /,}"
 else
   PKG_MESON_OPTS_TARGET+=" -Dvulkan-drivers="
+fi
+
+if [ "${DEVICE}" = "MT6785" ]; then
+  PKG_MESON_OPTS_HOST+=" -Dpanfrost-rust=false"
+  PKG_MESON_OPTS_TARGET+=" -Dpanfrost-rust=false"
 fi
 
 post_makeinstall_target() {
