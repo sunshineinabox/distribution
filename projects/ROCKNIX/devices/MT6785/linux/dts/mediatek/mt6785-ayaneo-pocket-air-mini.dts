@@ -767,59 +767,101 @@
 	sram-supply = <&mt6359_vsram_proc2>;
 };
 
+/*
+ * GammaOS MCDI idle states, handled by TF-A. The deeper ones (dram, syspll,
+ * bus26m, suspend: 0x1010002-0x1010005) go through the vendor SPM driver.
+ */
+&{/cpus} {
+	idle-states {
+		entry-method = "psci";
+
+		cpu_standby: cpu-standby {
+			compatible = "arm,idle-state";
+			arm,psci-suspend-param = <0x00000001>;
+			entry-latency-us = <600>;
+			exit-latency-us = <600>;
+			min-residency-us = <1200>;
+		};
+
+		cpu_off: cpu-off {
+			compatible = "arm,idle-state";
+			arm,psci-suspend-param = <0x00010001>;
+			local-timer-stop;
+			entry-latency-us = <600>;
+			exit-latency-us = <600>;
+			min-residency-us = <1200>;
+		};
+
+		cluster_off: cluster-off {
+			compatible = "arm,idle-state";
+			arm,psci-suspend-param = <0x01010001>;
+			local-timer-stop;
+			entry-latency-us = <600>;
+			exit-latency-us = <600>;
+			min-residency-us = <1200>;
+		};
+	};
+};
+
 &cpu0 {
 	#cooling-cells = <2>;
+	cpu-idle-states = <&cpu_standby &cpu_off &cluster_off>;
 	proc-supply = <&mt6359_vproc2>;
 	sram-supply = <&mt6359_vsram_proc2>;
 };
 
 &cpu1 {
 	#cooling-cells = <2>;
+	cpu-idle-states = <&cpu_standby &cpu_off &cluster_off>;
 	proc-supply = <&mt6359_vproc2>;
 	sram-supply = <&mt6359_vsram_proc2>;
 };
 
 &cpu2 {
 	#cooling-cells = <2>;
+	cpu-idle-states = <&cpu_standby &cpu_off &cluster_off>;
 	proc-supply = <&mt6359_vproc2>;
 	sram-supply = <&mt6359_vsram_proc2>;
 };
 
 &cpu3 {
 	#cooling-cells = <2>;
+	cpu-idle-states = <&cpu_standby &cpu_off &cluster_off>;
 	proc-supply = <&mt6359_vproc2>;
 	sram-supply = <&mt6359_vsram_proc2>;
 };
 
 &cpu4 {
 	#cooling-cells = <2>;
+	cpu-idle-states = <&cpu_standby &cpu_off &cluster_off>;
 	proc-supply = <&mt6359_vproc2>;
 	sram-supply = <&mt6359_vsram_proc2>;
 };
 
 &cpu5 {
 	#cooling-cells = <2>;
+	cpu-idle-states = <&cpu_standby &cpu_off &cluster_off>;
 	proc-supply = <&mt6359_vproc2>;
 	sram-supply = <&mt6359_vsram_proc2>;
 };
 
 &cpu6 {
 	#cooling-cells = <2>;
+	cpu-idle-states = <&cpu_standby &cpu_off &cluster_off>;
 	proc-supply = <&mt6359_vproc1>;
 	sram-supply = <&mt6359_vsram_proc1>;
 };
 
 &cpu7 {
 	#cooling-cells = <2>;
+	cpu-idle-states = <&cpu_standby &cpu_off &cluster_off>;
 	proc-supply = <&mt6359_vproc1>;
 	sram-supply = <&mt6359_vsram_proc1>;
 };
 
 /*
- * No rtc/codec/adc node. Leave power-off-time-sec / long-press-mode out:
- * mainline's MT6359_TOP_RST_MISC (0x14c) is the vendor's TOP_RST_MISC_SET, so
- * the default all-zero update is a no-op and the long-press reset stays as LK
- * set it.
+ * No power-off-time-sec or long-press-mode: mainline's TOP_RST_MISC is the
+ * vendor's TOP_RST_MISC_SET, so the long-press reset stays as LK set it.
  */
 &pwrap {
 	mt6359: pmic {
@@ -831,6 +873,10 @@
 		/* RTC BBPU + PWRHOLD power-off (patches/0001) */
 		power-controller {
 			compatible = "mediatek,mt6359-pwrc";
+		};
+
+		rtc {
+			compatible = "mediatek,mt6358-rtc";
 		};
 
 		/* only rails with a consumer, the rest stay undescribed so the kernel leaves them alone */
