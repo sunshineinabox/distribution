@@ -1,0 +1,12 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026-present ROCKNIX (https://github.com/ROCKNIX)
+
+# CONNSYS must be powered before gen4m probes, else its firmware asserts
+set -e
+
+modprobe wmt_drv
+wmt_loader --on
+modprobe wlan_drv_gen4m
+echo 1 >/dev/wmtWifi
+modprobe btmtk_stp

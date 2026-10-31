@@ -1,0 +1,11 @@
+[Unit]
+Description=MT6785 CONNSYS Wi-Fi
+After=systemd-modules-load.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/mt6785-connectivity
+
+[Install]
+WantedBy=multi-user.target

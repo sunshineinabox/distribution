@@ -42,13 +42,29 @@
 	};
 
 	/*
-	 * Must stay empty: LK appends its own mblock-* regions here and spins in
-	 * reserved_memory_conflict_check() if any node overlaps one of them.
+	 * No static reg nodes: LK appends its mblock-* regions here and hangs if one
+	 * overlaps them. Dynamic size/alloc-ranges nodes are not checked.
 	 */
 	reserved-memory {
 		#address-cells = <2>;
 		#size-cells = <2>;
 		ranges;
+
+		consys_mem: consys-reserve-memory {
+			compatible = "mediatek,consys-reserve-memory";
+			no-map;
+			size = <0 0x400000>;
+			alignment = <0 0x1000000>;
+			alloc-ranges = <0 0x40000000 0 0x80000000>;
+		};
+
+		wifi_mem: wifi-reserve-memory {
+			compatible = "shared-dma-pool";
+			no-map;
+			size = <0 0x300000>;
+			alignment = <0 0x1000000>;
+			alloc-ranges = <0 0x40000000 0 0x80000000>;
+		};
 	};
 
 	/* needed by Little Kernel */
@@ -764,7 +780,7 @@
  * set it.
  */
 &pwrap {
-	pmic {
+	mt6359: pmic {
 		compatible = "mediatek,mt6359";
 		interrupts-extended = <&pio 193 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-controller;
@@ -857,6 +873,25 @@
 				regulator-always-on;
 			};
 
+			/* CONNSYS rails at the stock values with WiFi on */
+			mt6359_vcn18: ldo_vcn18 {
+				regulator-name = "vcn18";
+				regulator-min-microvolt = <1800000>;
+				regulator-max-microvolt = <1800000>;
+			};
+
+			mt6359_vcn33_1_wifi: ldo_vcn33_1_wifi {
+				regulator-name = "vcn33_1_wifi";
+				regulator-min-microvolt = <3300000>;
+				regulator-max-microvolt = <3300000>;
+			};
+
+			mt6359_vcn33_2_wifi: ldo_vcn33_2_wifi {
+				regulator-name = "vcn33_2_wifi";
+				regulator-min-microvolt = <2800000>;
+				regulator-max-microvolt = <2800000>;
+			};
+
 			/* battery NTC pull-up */
 			mt6359_vbif28: ldo_vbif28 {
 				regulator-name = "vbif28";
@@ -888,9 +923,10 @@
 
 /*
  * scpsys powers every domain on at probe and fails as a whole if one does not
- * come up. MD has no modem rails here (power-on times out); audio and
- * connectivity have no users yet. MM and its CAM/ISP/VDEC/VENC subdomains
- * stay: the M4U waits for all of their larbs.
+ * come up. MD has no modem rails here (power-on times out); audio has no
+ * users yet; CONN must come up after its rails, so the CONNSYS driver
+ * sequences it. MM and its CAM/ISP/VDEC/VENC subdomains stay: the M4U waits
+ * for all of their larbs.
  */
 &{/soc/syscon@10006000/power-controller/power-domain@0} {
 	status = "disabled";
@@ -1186,6 +1222,53 @@
 		nvmem-cell-names = "lvts-calib-data-1", "lvts-calib-data-2",
 				   "lvts-calib-data-3";
 		#thermal-sensor-cells = <1>;
+	};
+
+	/* BTIF + AP DMA: the STP link to CONNSYS for the downstream btif driver */
+	btif@1100c000 {
+		compatible = "mediatek,btif";
+		reg = <0 0x1100c000 0 0x1000>,
+		      <0 0x11000b80 0 0x80>,
+		      <0 0x11000c00 0 0x80>;
+		interrupts = <GIC_SPI 138 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_SPI 155 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_SPI 154 IRQ_TYPE_LEVEL_LOW>;
+		clocks = <&infracfg CLK_INFRA_BTIF>, <&infracfg CLK_INFRA_AP_DMA>;
+		clock-names = "btifc", "apdmac";
+	};
+
+	/* CONNSYS (WMT), register order as mt6785.h *_BASE_INDEX */
+	consys@18002000 {
+		compatible = "mediatek,mt6785-consys";
+		reg = <0 0x18002000 0 0x1000>,
+		      <0 0x10007000 0 0x100>,
+		      <0 0x10001000 0 0x1000>,
+		      <0 0x10006000 0 0x1000>,
+		      <0 0x18007000 0 0x1000>,
+		      <0 0x180b1000 0 0x1000>,
+		      <0 0x180a3000 0 0x1000>,
+		      <0 0x180a5000 0 0x800>,
+		      <0 0x180c1000 0 0x1000>,
+		      <0 0x18004000 0 0x1000>,
+		      <0 0x1024c000 0 0x40>,
+		      <0 0x10003000 0 0x1000>;
+		interrupts = <GIC_SPI 321 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_SPI 78 IRQ_TYPE_LEVEL_LOW>,
+			     <GIC_SPI 323 IRQ_TYPE_EDGE_RISING>;
+		clocks = <&infracfg CLK_INFRA_CCIF4_AP>;
+		clock-names = "ccif";
+		memory-region = <&consys_mem>;
+		pmic = <&mt6359>;
+		vcn18-supply = <&mt6359_vcn18>;
+		vcn33_1_wifi-supply = <&mt6359_vcn33_1_wifi>;
+		vcn33_2_wifi-supply = <&mt6359_vcn33_2_wifi>;
+	};
+
+	wifi@18000000 {
+		compatible = "mediatek,wifi";
+		reg = <0 0x18000000 0 0x100000>;
+		interrupts = <GIC_SPI 322 IRQ_TYPE_LEVEL_LOW>;
+		memory-region = <&wifi_mem>;
 	};
 
 	/* Vol Down is keypad matrix key 0, pins left as LK set them */
