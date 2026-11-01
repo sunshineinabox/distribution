@@ -1,0 +1,8 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026-present ROCKNIX (https://github.com/ROCKNIX)
+
+# s2idle never resumes with cores parked in cpu-off, so idle in WFI instead
+for STATE in /sys/devices/system/cpu/cpu*/cpuidle/state*; do
+  [ "$(cat ${STATE}/name)" = "cpu-off" ] && echo 1 >${STATE}/disable
+done

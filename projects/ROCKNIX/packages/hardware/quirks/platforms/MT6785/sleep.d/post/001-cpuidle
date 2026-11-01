@@ -1,0 +1,7 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026-present ROCKNIX (https://github.com/ROCKNIX)
+
+for STATE in /sys/devices/system/cpu/cpu*/cpuidle/state*; do
+  [ "$(cat ${STATE}/name)" = "cpu-off" ] && echo 0 >${STATE}/disable
+done
