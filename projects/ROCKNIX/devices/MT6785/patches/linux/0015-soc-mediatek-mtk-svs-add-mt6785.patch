@@ -4,6 +4,7 @@ Subject: [PATCH] soc: mediatek: mtk-svs: add MT6785 support
 
 Add the MT6785 little, 2-line big and CCI banks with the vendor EEM values.
 A 2-line high bank without init01 takes its low bank's init01 offsets.
+Little and CCI drop the DVTFIXED margin like the vendor.
 ---
 diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
 --- a/drivers/soc/mediatek/mtk-svs.c
@@ -36,17 +37,10 @@ diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
  		}
  	}
  
-@@ -1949,6 +1970,46 @@
- 		svsb->dcbdet = svs_get_fuse_val(svsp->efuse, &dfmap[BDEV_DCBDET], 8);
- 		svsb->dcmdet = svs_get_fuse_val(svsp->efuse, &dfmap[BDEV_DCMDET], 8);
- 		svsb->vmax += svsb->dvt_fixed;
-+
-+		svsb->mts = (svsp->ts_coeff * 2) / 1000;
-+		svsb->bts = (((500 * golden_temp + svsp->ts_coeff) / 1000) - 25) * 4;
-+	}
-+
-+	return true;
-+}
+@@ -1956,7 +1977,47 @@
+ 
+ 	return true;
+ }
 +
 +static bool svs_mt6785_efuse_parsing(struct svs_platform *svsp,
 +				     const struct svs_platform_data *pdata)
@@ -54,7 +48,7 @@ diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
 +	struct svs_fusemap tfm = { 0, 0 };
 +	u32 golden_temp, ft_pgm;
 +	int i;
-+
+ 
 +	if (!svs_is_available(svsp))
 +		return false;
 +
@@ -80,10 +74,18 @@ diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
 +
 +		if (svsb->volt_flags & SVSB_REMOVE_DVTFIXED_VOLT)
 +			svsb->vmax += svsb->dvt_fixed;
- 
- 		svsb->mts = (svsp->ts_coeff * 2) / 1000;
- 		svsb->bts = (((500 * golden_temp + svsp->ts_coeff) / 1000) - 25) * 4;
-@@ -2755,7 +2816,139 @@
++
++		svsb->mts = (svsp->ts_coeff * 2) / 1000;
++		svsb->bts = (((500 * golden_temp + svsp->ts_coeff) / 1000) - 25) * 4;
++	}
++
++	return true;
++}
++
+ static bool svs_mt8183_efuse_parsing(struct svs_platform *svsp,
+ 				     const struct svs_platform_data *pdata)
+ {
+@@ -2755,7 +2816,141 @@
  		.dvt_fixed	= 0x3,
  		.vmax		= 0x40,
  		.vmin		= 0x14,
@@ -181,6 +183,7 @@ diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
 +			}
 +		},
 +		.volt_flags	= SVSB_INIT01_VOLT_INC_ONLY,
++		.volt_od	= -6,
 +		.mode_support	= SVSB_MODE_INIT01 | SVSB_MODE_INIT02 | SVSB_MODE_MON,
 +		.freq_base	= 2000000000,
 +		.core_sel	= 0x8fff0100,
@@ -213,6 +216,7 @@ diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
 +			}
 +		},
 +		.volt_flags	= SVSB_INIT01_VOLT_INC_ONLY,
++		.volt_od	= -6,
 +		.mode_support	= SVSB_MODE_INIT01 | SVSB_MODE_INIT02 | SVSB_MODE_MON,
 +		.freq_base	= 1400000000,
 +		.core_sel	= 0x8fff0102,
@@ -223,7 +227,7 @@ diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
  };
  
  static const struct svs_platform_data svs_mt8195_platform_data = {
-@@ -2826,12 +3019,27 @@
+@@ -2826,12 +3021,27 @@
  	}
  };
  
