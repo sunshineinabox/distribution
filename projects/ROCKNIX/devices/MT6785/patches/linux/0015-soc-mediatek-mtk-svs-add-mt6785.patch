@@ -2,24 +2,47 @@ From: sunshineinabox <aqemail@gmail.com>
 Date: Sun, 1 Nov 2026 10:00:00 +0000
 Subject: [PATCH] soc: mediatek: mtk-svs: add MT6785 support
 
-Add the MT6785 little, 2-line big and CCI banks with the vendor EEM values.
-A 2-line high bank without init01 takes its low bank's init01 offsets.
-Little and CCI drop the DVTFIXED margin like the vendor.
+Add the MT6785 little, 2-line big and CCI banks with the vendor EEM
+values. Let a 2-line high bank without init01 take its low bank's
+offsets, apply volt_od on 2-line banks and honour SVSB_MON_VOLT_IGNORE
+on 1-line banks.
 ---
 diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
 --- a/drivers/soc/mediatek/mtk-svs.c
 +++ b/drivers/soc/mediatek/mtk-svs.c
-@@ -1561,6 +1561,27 @@
- 			dev_err(svsb->dev, "init01 completion timeout\n");
- 			ret = -EBUSY;
- 			goto svs_init01_finish;
-+		}
+@@ -1021,9 +1021,11 @@
+ 		opp_stop = bdata->opp_count;
+ 	}
+ 
+-	for (i = opp_start; i < opp_stop; i++)
++	for (i = opp_start; i < opp_stop; i++) {
+ 		if (svsb->volt_flags & SVSB_REMOVE_DVTFIXED_VOLT)
+ 			svsb->volt[i] -= svsb->dvt_fixed;
++		svsb->volt[i] += svsb->volt_od;
 +	}
+ 
+ 	/* For voltage bin support */
+ 	if (svsb->opp_dfreq[0] > svsb->freq_base) {
+@@ -1137,6 +1139,10 @@
+ 	const struct svs_bank_pdata *bdata = &svsb->pdata;
+ 	u32 temp, i;
+ 
++	if (svsb->phase == SVSB_PHASE_MON &&
++	    svsb->volt_flags & SVSB_MON_VOLT_IGNORE)
++		return;
++
+ 	temp = svs_readl_relaxed(svsp, VOP74);
+ 	svsb->volt[14] = FIELD_GET(SVSB_VOPS_FLD_VOP3_7, temp);
+ 	svsb->volt[12] = FIELD_GET(SVSB_VOPS_FLD_VOP2_6, temp);
+@@ -1563,7 +1569,28 @@
+ 			goto svs_init01_finish;
+ 		}
+ 	}
 +
 +	/* 2-line high banks without init01 take their low bank's offsets */
 +	for (idx = 0; idx < svsp->bank_max; idx++) {
 +		struct svs_bank *svsb_low = &svsp->banks[idx];
-+
+ 
 +		if (svsb_low->pdata.type != SVSB_TYPE_LOW ||
 +		    !(svsb_low->mode_support & SVSB_MODE_INIT01))
 +			continue;
@@ -34,13 +57,23 @@ diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
 +
 +			svsb->dc_voffset_in = svsb_low->dc_voffset_in;
 +			svsb->age_voffset_in = svsb_low->age_voffset_in;
- 		}
- 	}
- 
-@@ -1956,7 +1977,47 @@
- 
- 	return true;
- }
++		}
++	}
++
+ svs_init01_finish:
+ 	for (idx = 0; idx < svsp->bank_max; idx++) {
+ 		svsb = &svsp->banks[idx];
+@@ -1949,7 +1976,47 @@
+ 		svsb->dcbdet = svs_get_fuse_val(svsp->efuse, &dfmap[BDEV_DCBDET], 8);
+ 		svsb->dcmdet = svs_get_fuse_val(svsp->efuse, &dfmap[BDEV_DCMDET], 8);
+ 		svsb->vmax += svsb->dvt_fixed;
++
++		svsb->mts = (svsp->ts_coeff * 2) / 1000;
++		svsb->bts = (((500 * golden_temp + svsp->ts_coeff) / 1000) - 25) * 4;
++	}
++
++	return true;
++}
 +
 +static bool svs_mt6785_efuse_parsing(struct svs_platform *svsp,
 +				     const struct svs_platform_data *pdata)
@@ -48,7 +81,7 @@ diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
 +	struct svs_fusemap tfm = { 0, 0 };
 +	u32 golden_temp, ft_pgm;
 +	int i;
- 
++
 +	if (!svs_is_available(svsp))
 +		return false;
 +
@@ -62,7 +95,7 @@ diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
 +	for (i = 0; i < svsp->bank_max; i++) {
 +		struct svs_bank *svsb = &svsp->banks[i];
 +		const struct svs_fusemap *dfmap = svsb->pdata.dev_fuse_map;
-+
+ 
 +		if (ft_pgm == 0)
 +			svsb->volt_flags |= SVSB_INIT01_VOLT_IGNORE;
 +
@@ -75,17 +108,10 @@ diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
 +		if (svsb->volt_flags & SVSB_REMOVE_DVTFIXED_VOLT)
 +			svsb->vmax += svsb->dvt_fixed;
 +
-+		svsb->mts = (svsp->ts_coeff * 2) / 1000;
-+		svsb->bts = (((500 * golden_temp + svsp->ts_coeff) / 1000) - 25) * 4;
-+	}
-+
-+	return true;
-+}
-+
- static bool svs_mt8183_efuse_parsing(struct svs_platform *svsp,
- 				     const struct svs_platform_data *pdata)
- {
-@@ -2755,7 +2816,141 @@
+ 		svsb->mts = (svsp->ts_coeff * 2) / 1000;
+ 		svsb->bts = (((500 * golden_temp + svsp->ts_coeff) / 1000) - 25) * 4;
+ 	}
+@@ -2755,7 +2822,143 @@
  		.dvt_fixed	= 0x3,
  		.vmax		= 0x40,
  		.vmin		= 0x14,
@@ -117,6 +143,7 @@ diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
 +			}
 +		},
 +		.volt_flags	= SVSB_INIT01_VOLT_INC_ONLY | SVSB_REMOVE_DVTFIXED_VOLT,
++		.volt_od	= 10,
 +		.mode_support	= SVSB_MODE_INIT01 | SVSB_MODE_INIT02,
 +		.freq_base	= 1670000000,
 +		.core_sel	= 0x8fff0101,
@@ -146,12 +173,13 @@ diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
 +			.tzone_ltemp		= 25000,
 +			.tzone_ltemp_voffset	= 8,
 +			.dev_fuse_map		= (const struct svs_fusemap[BDEV_MAX]) {
-+				{ 10, 0 }, { 10, 8 }, { 11, 0 }, { 10, 16 }, { 10, 24 }
++				{ 10, 0 }, { 10, 8 }, { 11, 16 }, { 10, 16 }, { 10, 24 }
 +			}
 +		},
 +		.volt_flags	= SVSB_REMOVE_DVTFIXED_VOLT | SVSB_MON_VOLT_IGNORE,
++		.volt_od	= 10,
 +		.mode_support	= SVSB_MODE_INIT02 | SVSB_MODE_MON,
-+		.freq_base	= 2050000000,
++		.freq_base	= 2100000000,
 +		.core_sel	= 0x0fff0105,
 +		.dvt_fixed	= 0x6,
 +		.vmax		= 0x73,
@@ -182,7 +210,7 @@ diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
 +				{ 16, 0 }, { 16, 8 }, { 17, 16 }, { 16, 16 }, { 16, 24 }
 +			}
 +		},
-+		.volt_flags	= SVSB_INIT01_VOLT_INC_ONLY,
++		.volt_flags	= SVSB_INIT01_VOLT_INC_ONLY | SVSB_MON_VOLT_IGNORE,
 +		.volt_od	= -6,
 +		.mode_support	= SVSB_MODE_INIT01 | SVSB_MODE_INIT02 | SVSB_MODE_MON,
 +		.freq_base	= 2000000000,
@@ -215,7 +243,7 @@ diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
 +				{ 4, 0 }, { 4, 8 }, { 5, 16 }, { 4, 16 }, { 4, 24 }
 +			}
 +		},
-+		.volt_flags	= SVSB_INIT01_VOLT_INC_ONLY,
++		.volt_flags	= SVSB_INIT01_VOLT_INC_ONLY | SVSB_MON_VOLT_IGNORE,
 +		.volt_od	= -6,
 +		.mode_support	= SVSB_MODE_INIT01 | SVSB_MODE_INIT02 | SVSB_MODE_MON,
 +		.freq_base	= 1400000000,
@@ -227,7 +255,7 @@ diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
  };
  
  static const struct svs_platform_data svs_mt8195_platform_data = {
-@@ -2826,12 +3021,27 @@
+@@ -2826,12 +3029,27 @@
  	}
  };
  
