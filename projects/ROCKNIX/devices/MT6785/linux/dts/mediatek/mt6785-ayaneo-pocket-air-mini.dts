@@ -1368,6 +1368,11 @@
 			reg = <0x1c8 0x8>;
 		};
 
+		/* EEM M_HW_RES0..24 */
+		svs_calibration: svs-calib@580 {
+			reg = <0x580 0x64>;
+		};
+
 		lvts_e_data3: lvts-others@93c {
 			reg = <0x93c 0x18>;
 		};
@@ -1383,6 +1388,19 @@
 		nvmem-cell-names = "lvts-calib-data-1", "lvts-calib-data-2",
 				   "lvts-calib-data-3";
 		#thermal-sensor-cells = <1>;
+	};
+
+	/* EEM banks 0xc00 into the thermal block */
+	svs: svs@1100bc00 {
+		compatible = "mediatek,mt6785-svs";
+		reg = <0 0x1100bc00 0 0x400>;
+		interrupts = <GIC_SPI 150 IRQ_TYPE_LEVEL_LOW>;
+		clocks = <&infracfg CLK_INFRA_THERM>;
+		clock-names = "main";
+		nvmem-cells = <&svs_calibration>, <&lvts_e_data1>;
+		nvmem-cell-names = "svs-calibration-data", "t-calibration-data";
+		resets = <&infracfg MT6785_INFRA_SVS_RST>;
+		reset-names = "svs_rst";
 	};
 
 	/* BTIF + AP DMA: the STP link to CONNSYS for the downstream btif driver */

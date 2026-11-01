@@ -1,0 +1,253 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sun, 1 Nov 2026 10:00:00 +0000
+Subject: [PATCH] soc: mediatek: mtk-svs: add MT6785 support
+
+Add the MT6785 little, 2-line big and CCI banks with the vendor EEM values.
+A 2-line high bank without init01 takes its low bank's init01 offsets.
+---
+diff --git a/drivers/soc/mediatek/mtk-svs.c b/drivers/soc/mediatek/mtk-svs.c
+--- a/drivers/soc/mediatek/mtk-svs.c
++++ b/drivers/soc/mediatek/mtk-svs.c
+@@ -1561,6 +1561,27 @@
+ 			dev_err(svsb->dev, "init01 completion timeout\n");
+ 			ret = -EBUSY;
+ 			goto svs_init01_finish;
++		}
++	}
++
++	/* 2-line high banks without init01 take their low bank's offsets */
++	for (idx = 0; idx < svsp->bank_max; idx++) {
++		struct svs_bank *svsb_low = &svsp->banks[idx];
++
++		if (svsb_low->pdata.type != SVSB_TYPE_LOW ||
++		    !(svsb_low->mode_support & SVSB_MODE_INIT01))
++			continue;
++
++		for (i = 0; i < svsp->bank_max; i++) {
++			svsb = &svsp->banks[i];
++
++			if (svsb->pdata.type != SVSB_TYPE_HIGH ||
++			    svsb->pdata.sw_id != svsb_low->pdata.sw_id ||
++			    svsb->mode_support & SVSB_MODE_INIT01)
++				continue;
++
++			svsb->dc_voffset_in = svsb_low->dc_voffset_in;
++			svsb->age_voffset_in = svsb_low->age_voffset_in;
+ 		}
+ 	}
+ 
+@@ -1949,6 +1970,46 @@
+ 		svsb->dcbdet = svs_get_fuse_val(svsp->efuse, &dfmap[BDEV_DCBDET], 8);
+ 		svsb->dcmdet = svs_get_fuse_val(svsp->efuse, &dfmap[BDEV_DCMDET], 8);
+ 		svsb->vmax += svsb->dvt_fixed;
++
++		svsb->mts = (svsp->ts_coeff * 2) / 1000;
++		svsb->bts = (((500 * golden_temp + svsp->ts_coeff) / 1000) - 25) * 4;
++	}
++
++	return true;
++}
++
++static bool svs_mt6785_efuse_parsing(struct svs_platform *svsp,
++				     const struct svs_platform_data *pdata)
++{
++	struct svs_fusemap tfm = { 0, 0 };
++	u32 golden_temp, ft_pgm;
++	int i;
++
++	if (!svs_is_available(svsp))
++		return false;
++
++	/* LVTS golden temperature is in bits [7:0] */
++	golden_temp = svs_get_fuse_val(svsp->tefuse, &tfm, 8);
++	if (!golden_temp)
++		golden_temp = 50;
++
++	ft_pgm = svs_get_fuse_val(svsp->efuse, &pdata->glb_fuse_map[GLB_FT_PGM], 4);
++
++	for (i = 0; i < svsp->bank_max; i++) {
++		struct svs_bank *svsb = &svsp->banks[i];
++		const struct svs_fusemap *dfmap = svsb->pdata.dev_fuse_map;
++
++		if (ft_pgm == 0)
++			svsb->volt_flags |= SVSB_INIT01_VOLT_IGNORE;
++
++		svsb->mtdes = svs_get_fuse_val(svsp->efuse, &dfmap[BDEV_MTDES], 8);
++		svsb->bdes = svs_get_fuse_val(svsp->efuse, &dfmap[BDEV_BDES], 8);
++		svsb->mdes = svs_get_fuse_val(svsp->efuse, &dfmap[BDEV_MDES], 8);
++		svsb->dcbdet = svs_get_fuse_val(svsp->efuse, &dfmap[BDEV_DCBDET], 8);
++		svsb->dcmdet = svs_get_fuse_val(svsp->efuse, &dfmap[BDEV_DCMDET], 8);
++
++		if (svsb->volt_flags & SVSB_REMOVE_DVTFIXED_VOLT)
++			svsb->vmax += svsb->dvt_fixed;
+ 
+ 		svsb->mts = (svsp->ts_coeff * 2) / 1000;
+ 		svsb->bts = (((500 * golden_temp + svsp->ts_coeff) / 1000) - 25) * 4;
+@@ -2755,7 +2816,139 @@
+ 		.dvt_fixed	= 0x3,
+ 		.vmax		= 0x40,
+ 		.vmin		= 0x14,
++	},
++};
++
++static struct svs_bank svs_mt6785_banks[] = {
++	{
++		.pdata = (const struct svs_bank_pdata) {
++			.sw_id			= SVSB_SWID_CPU_BIG,
++			.type			= SVSB_TYPE_LOW,
++			.set_freq_pct		= svs_set_bank_freq_pct_v3,
++			.get_volts		= svs_get_bank_volts_v3,
++			.cpu_id			= 6,
++			.buck_name		= "proc",
++			.opp_count		= MAX_OPP_ENTRIES,
++			.turn_freq_base		= 1670000000,
++			.vboot			= 0x40,
++			.volt_step		= 6250,
++			.volt_base		= 400000,
++			.age_config		= 0x555555,
++			.dc_config		= 0x555555,
++			.vco			= 0x20,
++			.chk_shift		= 0x87,
++			.int_st			= BIT(1),
++			.ctl0			= 0x00980003,
++			.dev_fuse_map		= (const struct svs_fusemap[BDEV_MAX]) {
++				{ 3, 0 }, { 3, 8 }, { 2, 0 }, { 3, 16 }, { 3, 24 }
++			}
++		},
++		.volt_flags	= SVSB_INIT01_VOLT_INC_ONLY | SVSB_REMOVE_DVTFIXED_VOLT,
++		.mode_support	= SVSB_MODE_INIT01 | SVSB_MODE_INIT02,
++		.freq_base	= 1670000000,
++		.core_sel	= 0x8fff0101,
++		.dvt_fixed	= 0x6,
++		.vmax		= 0x73,
++		.vmin		= 0x20,
++	},
++	{
++		.pdata = (const struct svs_bank_pdata) {
++			.sw_id			= SVSB_SWID_CPU_BIG,
++			.type			= SVSB_TYPE_HIGH,
++			.set_freq_pct		= svs_set_bank_freq_pct_v3,
++			.get_volts		= svs_get_bank_volts_v3,
++			.cpu_id			= 6,
++			.tzone_name		= "cpu-big0",
++			.opp_count		= MAX_OPP_ENTRIES,
++			.turn_freq_base		= 1670000000,
++			.volt_step		= 6250,
++			.volt_base		= 400000,
++			.age_config		= 0x555555,
++			.dc_config		= 0x555555,
++			.vco			= 0x20,
++			.chk_shift		= 0x87,
++			.int_st			= BIT(5),
++			.ctl0			= 0x00980003,
++			.tzone_htemp		= 85000,
++			.tzone_ltemp		= 25000,
++			.tzone_ltemp_voffset	= 8,
++			.dev_fuse_map		= (const struct svs_fusemap[BDEV_MAX]) {
++				{ 10, 0 }, { 10, 8 }, { 11, 0 }, { 10, 16 }, { 10, 24 }
++			}
++		},
++		.volt_flags	= SVSB_REMOVE_DVTFIXED_VOLT | SVSB_MON_VOLT_IGNORE,
++		.mode_support	= SVSB_MODE_INIT02 | SVSB_MODE_MON,
++		.freq_base	= 2050000000,
++		.core_sel	= 0x0fff0105,
++		.dvt_fixed	= 0x6,
++		.vmax		= 0x73,
++		.vmin		= 0x20,
+ 	},
++	{
++		.pdata = (const struct svs_bank_pdata) {
++			.sw_id			= SVSB_SWID_CPU_LITTLE,
++			.set_freq_pct		= svs_set_bank_freq_pct_v2,
++			.get_volts		= svs_get_bank_volts_v2,
++			.cpu_id			= 0,
++			.buck_name		= "proc",
++			.tzone_name		= "cpu-little0",
++			.opp_count		= MAX_OPP_ENTRIES,
++			.vboot			= 0x40,
++			.volt_step		= 6250,
++			.volt_base		= 400000,
++			.age_config		= 0x555555,
++			.dc_config		= 0x555555,
++			.vco			= 0x20,
++			.chk_shift		= 0x87,
++			.int_st			= BIT(0),
++			.ctl0			= 0x06540007,
++			.tzone_htemp		= 85000,
++			.tzone_ltemp		= 25000,
++			.tzone_ltemp_voffset	= 8,
++			.dev_fuse_map		= (const struct svs_fusemap[BDEV_MAX]) {
++				{ 16, 0 }, { 16, 8 }, { 17, 16 }, { 16, 16 }, { 16, 24 }
++			}
++		},
++		.volt_flags	= SVSB_INIT01_VOLT_INC_ONLY,
++		.mode_support	= SVSB_MODE_INIT01 | SVSB_MODE_INIT02 | SVSB_MODE_MON,
++		.freq_base	= 2000000000,
++		.core_sel	= 0x8fff0100,
++		.dvt_fixed	= 0x6,
++		.vmax		= 0x73,
++		.vmin		= 0x20,
++	},
++	{
++		.pdata = (const struct svs_bank_pdata) {
++			.sw_id			= SVSB_SWID_CCI,
++			.set_freq_pct		= svs_set_bank_freq_pct_v2,
++			.get_volts		= svs_get_bank_volts_v2,
++			.buck_name		= "proc",
++			.tzone_name		= "cpu-little0",
++			.opp_count		= MAX_OPP_ENTRIES,
++			.vboot			= 0x40,
++			.volt_step		= 6250,
++			.volt_base		= 400000,
++			.age_config		= 0x555555,
++			.dc_config		= 0x555555,
++			.vco			= 0x20,
++			.chk_shift		= 0x87,
++			.int_st			= BIT(2),
++			.ctl0			= 0x06540007,
++			.tzone_htemp		= 85000,
++			.tzone_ltemp		= 25000,
++			.tzone_ltemp_voffset	= 8,
++			.dev_fuse_map		= (const struct svs_fusemap[BDEV_MAX]) {
++				{ 4, 0 }, { 4, 8 }, { 5, 16 }, { 4, 16 }, { 4, 24 }
++			}
++		},
++		.volt_flags	= SVSB_INIT01_VOLT_INC_ONLY,
++		.mode_support	= SVSB_MODE_INIT01 | SVSB_MODE_INIT02 | SVSB_MODE_MON,
++		.freq_base	= 1400000000,
++		.core_sel	= 0x8fff0102,
++		.dvt_fixed	= 0x6,
++		.vmax		= 0x73,
++		.vmin		= 0x20,
++	},
+ };
+ 
+ static const struct svs_platform_data svs_mt8195_platform_data = {
+@@ -2826,12 +3019,27 @@
+ 	}
+ };
+ 
++static const struct svs_platform_data svs_mt6785_platform_data = {
++	.name = "mt6785-svs",
++	.banks = svs_mt6785_banks,
++	.efuse_parsing = svs_mt6785_efuse_parsing,
++	.probe = svs_mt8192_platform_probe,
++	.regs = svs_regs_v2,
++	.bank_max = ARRAY_SIZE(svs_mt6785_banks),
++	.ts_coeff = SVSB_TS_COEFF_MT8186,
++	.glb_fuse_map = (const struct svs_fusemap[GLB_MAX]) {
++		/* VMIN not present */
++		{ 0, 4 }, { -1, 0 }
++	}
++};
++
+ static const struct of_device_id svs_of_match[] = {
+ 	{ .compatible = "mediatek,mt8195-svs", .data = &svs_mt8195_platform_data },
+ 	{ .compatible = "mediatek,mt8192-svs", .data = &svs_mt8192_platform_data },
+ 	{ .compatible = "mediatek,mt8188-svs", .data = &svs_mt8188_platform_data },
+ 	{ .compatible = "mediatek,mt8186-svs", .data = &svs_mt8186_platform_data },
+ 	{ .compatible = "mediatek,mt8183-svs", .data = &svs_mt8183_platform_data },
++	{ .compatible = "mediatek,mt6785-svs", .data = &svs_mt6785_platform_data },
+ 	{ /* sentinel */ }
+ };
+ MODULE_DEVICE_TABLE(of, svs_of_match);
