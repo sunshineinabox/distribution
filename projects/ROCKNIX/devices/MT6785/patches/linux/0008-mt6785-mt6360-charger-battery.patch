@@ -85,7 +85,7 @@ index 77747eb51..ca4b5d5b7 100644
  				  MT6360_VMIVR_MASK,
  				  sel << MT6360_VMIVR_SHFT);
  }
-@@ -443,6 +472,307 @@ static int mt6360_charger_set_ieoc(struct mt6360_chg_info *mci,
+@@ -443,6 +472,308 @@ static int mt6360_charger_set_ieoc(struct mt6360_chg_info *mci,
  				  sel << MT6360_IEOC_SHFT);
  }
  
@@ -221,7 +221,8 @@ index 77747eb51..ca4b5d5b7 100644
 +	if (mci->bat_psy && (changed || old_cap != mci->bat_cap))
 +		power_supply_changed(mci->bat_psy);
 +
-+	schedule_delayed_work(&mci->bat_work, msecs_to_jiffies(MT6360_BAT_POLL_MS));
++	queue_delayed_work(system_freezable_wq, &mci->bat_work,
++			   msecs_to_jiffies(MT6360_BAT_POLL_MS));
 +}
 +
 +static const enum power_supply_property mt6360_bat_props[] = {
@@ -386,14 +387,14 @@ index 77747eb51..ca4b5d5b7 100644
 +					     "Failed to register battery\n");
 +	}
 +
-+	schedule_delayed_work(&mci->bat_work, 0);
++	queue_delayed_work(system_freezable_wq, &mci->bat_work, 0);
 +	return 0;
 +}
 +
  static int mt6360_charger_get_property(struct power_supply *psy,
  				       enum power_supply_property psp,
  				       union power_supply_propval *val)
-@@ -560,6 +890,27 @@ static enum power_supply_property mt6360_charger_properties[] = {
+@@ -560,6 +891,27 @@ static enum power_supply_property mt6360_charger_properties[] = {
  	POWER_SUPPLY_PROP_USB_TYPE,
  };
  
@@ -421,7 +422,7 @@ index 77747eb51..ca4b5d5b7 100644
  static const struct power_supply_desc mt6360_charger_desc = {
  	.type			= POWER_SUPPLY_TYPE_USB,
  	.properties		= mt6360_charger_properties,
-@@ -567,12 +918,18 @@ static const struct power_supply_desc mt6360_charger_desc = {
+@@ -567,12 +919,18 @@ static const struct power_supply_desc mt6360_charger_desc = {
  	.get_property		= mt6360_charger_get_property,
  	.set_property		= mt6360_charger_set_property,
  	.property_is_writeable	= mt6360_charger_property_is_writeable,
@@ -440,7 +441,7 @@ index 77747eb51..ca4b5d5b7 100644
  static const struct regulator_ops mt6360_chg_otg_ops = {
  	.list_voltage = regulator_list_voltage_linear,
  	.enable = regulator_enable_regmap,
-@@ -580,6 +937,8 @@ static const struct regulator_ops mt6360_chg_otg_ops = {
+@@ -580,6 +938,8 @@ static const struct regulator_ops mt6360_chg_otg_ops = {
  	.is_enabled = regulator_is_enabled_regmap,
  	.set_voltage_sel = regulator_set_voltage_sel_regmap,
  	.get_voltage_sel = regulator_get_voltage_sel_regmap,
@@ -449,7 +450,7 @@ index 77747eb51..ca4b5d5b7 100644
  };
  
  static const struct regulator_desc mt6360_otg_rdesc = {
-@@ -595,6 +954,10 @@ static const struct regulator_desc mt6360_otg_rdesc = {
+@@ -595,6 +955,10 @@ static const struct regulator_desc mt6360_otg_rdesc = {
  	.vsel_mask = MT6360_VOBST_MASK,
  	.enable_reg = MT6360_PMU_CHG_CTRL1,
  	.enable_mask = MT6360_OPA_MODE_MASK,
@@ -460,7 +461,7 @@ index 77747eb51..ca4b5d5b7 100644
  };
  
  static irqreturn_t mt6360_pmu_attach_i_handler(int irq, void *data)
-@@ -645,6 +1008,7 @@ static irqreturn_t mt6360_pmu_attach_i_handler(int irq, void *data)
+@@ -645,6 +1009,7 @@ static irqreturn_t mt6360_pmu_attach_i_handler(int irq, void *data)
  	}
  
  	dev_dbg(mci->dev, "Received attach interrupt, chg_type = %d\n", mci->psy_usb_type);
@@ -468,7 +469,7 @@ index 77747eb51..ca4b5d5b7 100644
  	if (last_usb_type != mci->psy_usb_type)
  		power_supply_changed(mci->psy);
  out:
-@@ -669,6 +1033,7 @@ static void mt6360_handle_chrdet_ext_evt(struct mt6360_chg_info *mci)
+@@ -669,6 +1034,7 @@ static void mt6360_handle_chrdet_ext_evt(struct mt6360_chg_info *mci)
  	dev_dbg(mci->dev, "Received vbus interrupt, pwr_rdy = %d\n", pwr_rdy);
  	if (!pwr_rdy) {
  		mci->psy_usb_type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
@@ -476,7 +477,7 @@ index 77747eb51..ca4b5d5b7 100644
  		power_supply_changed(mci->psy);
  
  	}
-@@ -818,6 +1183,10 @@ static int mt6360_charger_probe(struct platform_device *pdev)
+@@ -818,6 +1184,10 @@ static int mt6360_charger_probe(struct platform_device *pdev)
  				     "Failed to register power supply dev\n");
  
  
