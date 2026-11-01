@@ -7,24 +7,93 @@
 DEBUG=false
 sleep 1 && COOLING_PROFILE=$(get_setting "cooling.profile")
 FAN_PWM="${DEVICE_PWM_FAN}"
+FAN_ENABLE="${DEVICE_PWM_FAN}_enable"
+FAN_MODE="${DEVICE_FAN_ENABLE_MODE:-1}"
 
-# Enable fan if it's turned off
-if [ -f "${DEVICE_PWM_FAN}_enable" ] && [ "$(cat "${DEVICE_PWM_FAN}_enable")" != "1" ]; then
-  echo 1 > "${DEVICE_PWM_FAN}_enable"
-  echo "Enabling fan pwm"
-fi
+# Profile = trip temps
+TRIPS_AGGRESSIVE="40000 48000 55000 61000 66000 71000"
+TRIPS_MODERATE="45000 55000 62000 68000 73000 78000"
+TRIPS_QUIET="52000 62000 69000 75000 80000 85000"
 
-log $0 "Setting profile to ${COOLING_PROFILE}"
+# Fallback PWM curve
+FB_SPEEDS=(255 204 179 153 128 102 77 51 0)
+FB_AGGRESSIVE=(72000 68000 64000 60000 56000 52000 46000 40000 0)
+FB_MODERATE=(78000 74000 70000 66000 62000 57000 50000 43000 0)
+FB_QUIET=(84000 80000 76000 72000 67000 62000 55000 47000 0)
+
+HYSTERESIS=5000
 
 function set_control() {
   log $0 "Set fan control to ${1}"
-  if [ -e "${DEVICE_PWM_FAN}_enable" ]
+  if [ -e "${FAN_ENABLE}" ]
   then
-    echo ${1} >${DEVICE_PWM_FAN}_enable
+    echo ${1} >"${FAN_ENABLE}"
   fi
 }
 
-trap "set_control 0 && exit 0" SIGHUP SIGINT SIGQUIT SIGABRT
+# Thermal zones the device tree binds the fan to (CPU and GPU)
+function fan_zones() {
+  local zone cdev
+  for zone in /sys/class/thermal/thermal_zone*
+  do
+    for cdev in "${zone}"/cdev*
+    do
+      [ -e "${cdev}/type" ] || continue
+      if [ "$(cat "${cdev}/type" 2>/dev/null)" = "pwm-fan" ]
+      then
+        echo "${zone}"
+        break
+      fi
+    done
+  done
+}
+
+function active_trips() {
+  local zone="${1}" f idx
+  for f in "${zone}"/trip_point_*_type
+  do
+    [ -e "${f}" ] || continue
+    [ "$(cat "${f}" 2>/dev/null)" = "active" ] || continue
+    idx="${f##*/trip_point_}"
+    echo "${idx%_type}"
+  done | sort -n
+}
+
+function set_trips() {
+  local zone="${1}" temps="${2}" idx
+  set -- ${temps}
+  for idx in $(active_trips "${zone}")
+  do
+    [ -n "${1}" ] || break
+    $DEBUG && log $0 "$(cat ${zone}/type) trip_point_${idx}_temp = ${1}"
+    echo "${1}" >"${zone}/trip_point_${idx}_temp" 2>/dev/null
+    shift
+  done
+}
+
+function zone_mode() {
+  local zone
+  for zone in ${FAN_ZONES}
+  do
+    [ -e "${zone}/mode" ] && echo "${1}" >"${zone}/mode" 2>/dev/null
+  done
+}
+
+# Hand the fan back to the kernel rather than switching it off
+function cleanup() {
+  set_control ${FAN_MODE} >/dev/null 2>&1
+  zone_mode enabled
+  exit 0
+}
+
+trap cleanup SIGHUP SIGINT SIGQUIT SIGABRT SIGTERM
+
+FAN_ZONES="$(fan_zones)"
+
+# The fan is hard disabled at enable=0 and ignores every pwm1 write
+set_control ${FAN_MODE} >/dev/null 2>&1
+
+log $0 "Setting profile to ${COOLING_PROFILE}"
 
 if [ "${COOLING_PROFILE}" = "custom" ]
 then
@@ -47,28 +116,50 @@ then
   fi
 fi
 
-
-if [ ! "${COOLING_PROFILE}" = "custom" ]
+# A custom profile brings its own speeds/temps
+if [ "${COOLING_PROFILE}" = "custom" ]
 then
-  if [ "${COOLING_PROFILE}" = "aggressive" ]; then
-    SPEEDS=(255 204 153 119 102 77 51 0)
-    TEMPS=(80000 75000 70000 65000 60000 55000 50000 0)
-  elif [ "${COOLING_PROFILE}" = "moderate" ]; then
-    SPEEDS=(255 204 153 119 102 77 51 0)
-    TEMPS=(85000 80000 75000 70000 65000 60000 55000 0)
-  elif [ "${COOLING_PROFILE}" = "quiet" ]; then
-    SPEEDS=(255 204 153 119 102 77 51 0)
-    TEMPS=(95000 85000 80000 75000 70000 65000 60000 0)
-  else
-    # default to moderate
-    SPEEDS=(255 204 153 119 102 77 51 0)
-    TEMPS=(85000 80000 75000 70000 65000 60000 55000 0)
+  if [ -n "${FAN_ZONES}" ]
+  then
+    log $0 "Custom profile, taking the fan from the kernel"
+    zone_mode disabled
   fi
+else
+  case "${COOLING_PROFILE}" in
+    aggressive)
+      TRIPS="${TRIPS_AGGRESSIVE}"
+      SPEEDS=("${FB_SPEEDS[@]}")
+      TEMPS=("${FB_AGGRESSIVE[@]}")
+      ;;
+    quiet)
+      TRIPS="${TRIPS_QUIET}"
+      SPEEDS=("${FB_SPEEDS[@]}")
+      TEMPS=("${FB_QUIET[@]}")
+      ;;
+    *)
+      TRIPS="${TRIPS_MODERATE}"
+      SPEEDS=("${FB_SPEEDS[@]}")
+      TEMPS=("${FB_MODERATE[@]}")
+      ;;
+  esac
+
+  if [ -n "${FAN_ZONES}" ]
+  then
+    for zone in ${FAN_ZONES}
+    do
+      log $0 "Fan driven by $(cat ${zone}/type), setting trips to ${TRIPS}"
+      set_trips "${zone}" "${TRIPS}"
+    done
+    zone_mode enabled
+    exit 0
+  fi
+
+  log $0 "No thermal zone drives the fan, falling back to pwm control."
 fi
 
 log $0 "Enabling fan control."
-set_control 1 >/dev/null 2>&1
 
+LASTINDEX=""
 while true
 do
   CPU_TEMP=$(awk '{total += $1; count++} END {printf "%d", total/count}' ${DEVICE_TEMP_SENSOR})
@@ -82,15 +173,30 @@ do
     fi
     INDEX=$(( $INDEX + 1 ))
   done
+
+  if [ -n "${LASTINDEX}" ]
+  then
+    if (( ${INDEX} > ${LASTINDEX} ))
+    then
+      if (( "${CPU_TEMP}" > ${TEMPS[${LASTINDEX}]} - ${HYSTERESIS} ))
+      then
+        INDEX=${LASTINDEX}
+      else
+        INDEX=$(( ${LASTINDEX} + 1 ))
+      fi
+    elif (( ${INDEX} < ${LASTINDEX} - 2 ))
+    then
+      INDEX=$(( ${LASTINDEX} - 2 ))
+    fi
+  fi
+
   FSPEED=${SPEEDS[${INDEX}]}
   if [ ! "${LASTSPEED}" = "${FSPEED}" ]
   then
-    $DEBUG && log $0 "Setting PWM FAN to ${FSPEED} (${TEMP})" 2>/dev/null
+    $DEBUG && log $0 "Setting PWM FAN to ${FSPEED} (${TEMPS[${INDEX}]})" 2>/dev/null
     echo ${FSPEED} >${FAN_PWM}
     LASTSPEED=${FSPEED}
   fi
+  LASTINDEX=${INDEX}
   sleep 3
 done
-
-log $0 "Disabling fan control."
-set_control 0 >/dev/null 2>&1

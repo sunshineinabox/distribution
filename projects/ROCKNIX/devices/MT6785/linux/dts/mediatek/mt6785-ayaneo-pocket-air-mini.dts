@@ -108,7 +108,7 @@
 		fan-stop-to-start-percent = <100>;
 		fan-stop-to-start-us = <50000>;
 		#cooling-cells = <2>;
-		cooling-levels = <0 77 128 191 255>;
+		cooling-levels = <0 51 77 102 128 153 179 204 255>;
 		pinctrl-names = "default";
 		pinctrl-0 = <&fan_pins>;
 	};
@@ -177,6 +177,48 @@
 					   <50000 1694602>,
 					   <55000 1472388>,
 					   <60000 1279594>;
+	};
+
+	/* NCP15WF104F03RC with a 390k pull-up to 1.8 V, AUXADC value in mV */
+	board_ntc: thermal-sensor-board {
+		compatible = "generic-adc-thermal";
+		#thermal-sensor-cells = <0>;
+		io-channels = <&auxadc 0>;
+		io-channel-names = "sensor-channel";
+		temperature-lookup-table = <(-40000) 1653>,
+					   <(-35000) 1598>,
+					   <(-30000) 1529>,
+					   <(-25000) 1444>,
+					   <(-20000) 1344>,
+					   <(-15000) 1232>,
+					   <(-10000) 1111>,
+					   <(-5000) 985>,
+					   <0 860>,
+					   <5000 740>,
+					   <10000 629>,
+					   <15000 530>,
+					   <20000 442>,
+					   <25000 367>,
+					   <30000 304>,
+					   <35000 251>,
+					   <40000 207>,
+					   <45000 171>,
+					   <50000 141>,
+					   <55000 117>,
+					   <60000 97>,
+					   <65000 81>,
+					   <70000 67>,
+					   <75000 56>,
+					   <80000 47>,
+					   <85000 40>,
+					   <90000 34>,
+					   <95000 29>,
+					   <100000 25>,
+					   <105000 21>,
+					   <110000 18>,
+					   <115000 15>,
+					   <120000 13>,
+					   <125000 12>;
 	};
 
 	/* gamepad power, sequenced like the stock mtk-gamepad probe */
@@ -445,11 +487,55 @@
 		pinctrl-9 = <&aud_dat_miso_ch34_on_pins>;
 	};
 
+	/* stock trip points, the fan reaches full speed before the 85 C throttle */
 	thermal-zones {
 		battery-thermal {
 			polling-delay-passive = <0>;
 			polling-delay = <5000>;
 			thermal-sensors = <&battery_ntc>;
+
+			trips {
+				trip-crit {
+					temperature = <60000>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+			};
+		};
+
+		board-thermal {
+			polling-delay-passive = <1000>;
+			polling-delay = <5000>;
+			thermal-sensors = <&board_ntc>;
+
+			trips {
+				board_alert: trip-alert {
+					temperature = <51000>;
+					hysteresis = <2000>;
+					type = "passive";
+				};
+
+				trip-crit {
+					temperature = <90000>;
+					hysteresis = <0>;
+					type = "critical";
+				};
+			};
+
+			cooling-maps {
+				map0 {
+					trip = <&board_alert>;
+					cooling-device = <&cpu0 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu1 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu2 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu3 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu4 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu5 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu6 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&cpu7 THERMAL_NO_LIMIT THERMAL_NO_LIMIT>,
+							 <&gpu THERMAL_NO_LIMIT THERMAL_NO_LIMIT>;
+				};
+			};
 		};
 
 		cpu-big0-thermal {
@@ -459,25 +545,37 @@
 
 			trips {
 				big0_fan0: trip-fan0 {
-					temperature = <55000>;
+					temperature = <45000>;
 					hysteresis = <5000>;
 					type = "active";
 				};
 
 				big0_fan1: trip-fan1 {
-					temperature = <62000>;
+					temperature = <55000>;
 					hysteresis = <5000>;
 					type = "active";
 				};
 
 				big0_fan2: trip-fan2 {
-					temperature = <69000>;
+					temperature = <62000>;
 					hysteresis = <5000>;
 					type = "active";
 				};
 
 				big0_fan3: trip-fan3 {
-					temperature = <76000>;
+					temperature = <68000>;
+					hysteresis = <5000>;
+					type = "active";
+				};
+
+				big0_fan4: trip-fan4 {
+					temperature = <73000>;
+					hysteresis = <5000>;
+					type = "active";
+				};
+
+				big0_fan5: trip-fan5 {
+					temperature = <78000>;
 					hysteresis = <5000>;
 					type = "active";
 				};
@@ -520,6 +618,16 @@
 				map4 {
 					trip = <&big0_fan3>;
 					cooling-device = <&fan 4 4>;
+				};
+
+				map5 {
+					trip = <&big0_fan4>;
+					cooling-device = <&fan 6 6>;
+				};
+
+				map6 {
+					trip = <&big0_fan5>;
+					cooling-device = <&fan 8 8>;
 				};
 			};
 		};
@@ -655,25 +763,37 @@
 
 			trips {
 				gpu0_fan0: trip-fan0 {
-					temperature = <55000>;
+					temperature = <45000>;
 					hysteresis = <5000>;
 					type = "active";
 				};
 
 				gpu0_fan1: trip-fan1 {
-					temperature = <62000>;
+					temperature = <55000>;
 					hysteresis = <5000>;
 					type = "active";
 				};
 
 				gpu0_fan2: trip-fan2 {
-					temperature = <69000>;
+					temperature = <62000>;
 					hysteresis = <5000>;
 					type = "active";
 				};
 
 				gpu0_fan3: trip-fan3 {
-					temperature = <76000>;
+					temperature = <68000>;
+					hysteresis = <5000>;
+					type = "active";
+				};
+
+				gpu0_fan4: trip-fan4 {
+					temperature = <73000>;
+					hysteresis = <5000>;
+					type = "active";
+				};
+
+				gpu0_fan5: trip-fan5 {
+					temperature = <78000>;
 					hysteresis = <5000>;
 					type = "active";
 				};
@@ -715,6 +835,16 @@
 				map4 {
 					trip = <&gpu0_fan3>;
 					cooling-device = <&fan 4 4>;
+				};
+
+				map5 {
+					trip = <&gpu0_fan4>;
+					cooling-device = <&fan 6 6>;
+				};
+
+				map6 {
+					trip = <&gpu0_fan5>;
+					cooling-device = <&fan 8 8>;
 				};
 			};
 		};
