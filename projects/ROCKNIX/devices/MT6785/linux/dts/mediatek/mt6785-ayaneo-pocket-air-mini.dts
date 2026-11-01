@@ -783,6 +783,17 @@
 	};
 };
 
+/* stock big-core top OPP is 2.1 GHz, not 2.05 GHz */
+&cluster1_opp {
+	/delete-node/ opp-2050000000;
+
+	opp-2100000000 {
+		opp-hz = /bits/ 64 <2100000000>;
+		opp-microvolt = <1118750>;
+		required-opps = <&cci_opp_15>;
+	};
+};
+
 &cpu0 {
 	#cooling-cells = <2>;
 	cpu-idle-states = <&cpu_off>;
