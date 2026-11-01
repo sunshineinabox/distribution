@@ -1328,13 +1328,96 @@
 	status = "okay";
 };
 
-/* GammaOS tops the GPU at 950 MHz, not mt6785.dtsi's 900 MHz */
-&gpu_opp_table {
-	/delete-node/ opp-900000000;
+/*
+ * GammaOS EEM measures the GPU at these 16 points (950 MHz + the gpufreq
+ * ptpod rows). Unadjusted stock volts; mtk-svs needs exactly 16 OPPs.
+ */
+/delete-node/ &gpu_opp_table;
 
-	opp-950000000 {
-		opp-hz = /bits/ 64 <950000000>;
-		opp-microvolt = <875000>;
+/ {
+	gpu_opp_table: opp-table-gpu {
+		compatible = "operating-points-v2";
+		opp-shared;
+
+		opp-270000000 {
+			opp-hz = /bits/ 64 <270000000>;
+			opp-microvolt = <612500>;
+		};
+
+		opp-320000000 {
+			opp-hz = /bits/ 64 <320000000>;
+			opp-microvolt = <625000>;
+		};
+
+		opp-370000000 {
+			opp-hz = /bits/ 64 <370000000>;
+			opp-microvolt = <637500>;
+		};
+
+		opp-420000000 {
+			opp-hz = /bits/ 64 <420000000>;
+			opp-microvolt = <650000>;
+		};
+
+		opp-470000000 {
+			opp-hz = /bits/ 64 <470000000>;
+			opp-microvolt = <662500>;
+		};
+
+		opp-520000000 {
+			opp-hz = /bits/ 64 <520000000>;
+			opp-microvolt = <675000>;
+		};
+
+		opp-570000000 {
+			opp-hz = /bits/ 64 <570000000>;
+			opp-microvolt = <687500>;
+		};
+
+		opp-620000000 {
+			opp-hz = /bits/ 64 <620000000>;
+			opp-microvolt = <700000>;
+		};
+
+		opp-648000000 {
+			opp-hz = /bits/ 64 <648000000>;
+			opp-microvolt = <712500>;
+		};
+
+		opp-677000000 {
+			opp-hz = /bits/ 64 <677000000>;
+			opp-microvolt = <725000>;
+		};
+
+		opp-706000000 {
+			opp-hz = /bits/ 64 <706000000>;
+			opp-microvolt = <737500>;
+		};
+
+		opp-735000000 {
+			opp-hz = /bits/ 64 <735000000>;
+			opp-microvolt = <750000>;
+		};
+
+		opp-763000000 {
+			opp-hz = /bits/ 64 <763000000>;
+			opp-microvolt = <762500>;
+		};
+
+		opp-806000000 {
+			opp-hz = /bits/ 64 <806000000>;
+			opp-microvolt = <781250>;
+		};
+
+		opp-850000000 {
+			opp-hz = /bits/ 64 <850000000>;
+			opp-microvolt = <800000>;
+		};
+
+		opp-950000000 {
+			opp-hz = /bits/ 64 <950000000>;
+			opp-microvolt = <875000>;
+		};
 	};
 };
 
