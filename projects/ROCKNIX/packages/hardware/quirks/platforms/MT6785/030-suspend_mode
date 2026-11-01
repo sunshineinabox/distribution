@@ -1,0 +1,12 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026-present ROCKNIX (https://github.com/ROCKNIX)
+
+. /etc/profile.d/001-functions
+
+# Deep sleep never wakes without the vendor SPM driver to arm wake sources
+MYSLEEPMODE=$(get_setting system.suspendmode)
+if [ -z "${MYSLEEPMODE}" ]
+then
+  /usr/bin/suspendmode freeze
+fi
