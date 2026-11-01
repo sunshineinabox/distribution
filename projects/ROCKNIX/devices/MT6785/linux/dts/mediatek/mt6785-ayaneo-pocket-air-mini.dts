@@ -864,15 +864,13 @@
 			};
 
 			/*
-			 * GPU rails as GammaOS uses them (vgpu11 + vpu as vsram_gpu),
-			 * spanning the mt6785.dtsi OPPs = the vendor sign-off table.
-			 * The MediaTek coupler keeps vsram = max(850 mV, vgpu + 100 mV)
-			 * like the vendor gpufreq; both may go off with the MFG domains.
+			 * vpu serves as vsram_gpu, coupled at vgpu + 100 mV and at least 850 mV as
+			 * stock; both may go off with the MFG domains
 			 */
 			mt6359_vgpu11: buck_vgpu11 {
 				regulator-name = "vgpu";
 				regulator-min-microvolt = <612500>;
-				regulator-max-microvolt = <850000>;
+				regulator-max-microvolt = <875000>;
 				regulator-ramp-delay = <5000>;
 				regulator-enable-ramp-delay = <200>;
 				regulator-coupled-with = <&mt6359_vpu>;
@@ -882,7 +880,7 @@
 			mt6359_vpu: buck_vpu {
 				regulator-name = "vsram_gpu";
 				regulator-min-microvolt = <850000>;
-				regulator-max-microvolt = <950000>;
+				regulator-max-microvolt = <975000>;
 				regulator-ramp-delay = <5000>;
 				regulator-enable-ramp-delay = <200>;
 				regulator-coupled-with = <&mt6359_vgpu11>;
@@ -1294,6 +1292,16 @@
 
 &pwm1 {
 	status = "okay";
+};
+
+/* GammaOS tops the GPU at 950 MHz, not mt6785.dtsi's 900 MHz */
+&gpu_opp_table {
+	/delete-node/ opp-900000000;
+
+	opp-950000000 {
+		opp-hz = /bits/ 64 <950000000>;
+		opp-microvolt = <875000>;
+	};
 };
 
 &gpu {
