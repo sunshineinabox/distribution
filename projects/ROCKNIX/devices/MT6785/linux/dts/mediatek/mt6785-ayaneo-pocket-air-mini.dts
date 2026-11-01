@@ -4,6 +4,7 @@
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/iio/adc/mediatek,mt6359-auxadc.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/interconnect/mediatek,mt8183.h>
 #include <dt-bindings/leds/common.h>
 #include <dt-bindings/thermal/mediatek,lvts-thermal.h>
 #include <dt-bindings/thermal/thermal.h>
@@ -1329,8 +1330,8 @@
 };
 
 /*
- * GammaOS EEM measures the GPU at these 16 points (950 MHz + the gpufreq
- * ptpod rows). Unadjusted stock volts; mtk-svs needs exactly 16 OPPs.
+ * Stock GPU volts at the 16 EEM points mtk-svs needs; opp-peak-kBps picks the
+ * vendor DDR_QOS level for each frequency.
  */
 /delete-node/ &gpu_opp_table;
 
@@ -1342,91 +1343,126 @@
 		opp-270000000 {
 			opp-hz = /bits/ 64 <270000000>;
 			opp-microvolt = <612500>;
+			opp-peak-kBps = <2600000>;
 		};
 
 		opp-320000000 {
 			opp-hz = /bits/ 64 <320000000>;
 			opp-microvolt = <625000>;
+			opp-peak-kBps = <2600000>;
 		};
 
 		opp-370000000 {
 			opp-hz = /bits/ 64 <370000000>;
 			opp-microvolt = <637500>;
+			opp-peak-kBps = <2600000>;
 		};
 
 		opp-420000000 {
 			opp-hz = /bits/ 64 <420000000>;
 			opp-microvolt = <650000>;
+			opp-peak-kBps = <5600000>;
 		};
 
 		opp-470000000 {
 			opp-hz = /bits/ 64 <470000000>;
 			opp-microvolt = <662500>;
+			opp-peak-kBps = <5600000>;
 		};
 
 		opp-520000000 {
 			opp-hz = /bits/ 64 <520000000>;
 			opp-microvolt = <675000>;
+			opp-peak-kBps = <5600000>;
 		};
 
 		opp-570000000 {
 			opp-hz = /bits/ 64 <570000000>;
 			opp-microvolt = <687500>;
+			opp-peak-kBps = <8000000>;
 		};
 
 		opp-620000000 {
 			opp-hz = /bits/ 64 <620000000>;
 			opp-microvolt = <700000>;
+			opp-peak-kBps = <8000000>;
 		};
 
 		opp-648000000 {
 			opp-hz = /bits/ 64 <648000000>;
 			opp-microvolt = <712500>;
+			opp-peak-kBps = <8000000>;
 		};
 
 		opp-677000000 {
 			opp-hz = /bits/ 64 <677000000>;
 			opp-microvolt = <725000>;
+			opp-peak-kBps = <8000000>;
 		};
 
 		opp-706000000 {
 			opp-hz = /bits/ 64 <706000000>;
 			opp-microvolt = <737500>;
+			opp-peak-kBps = <8000000>;
 		};
 
 		opp-735000000 {
 			opp-hz = /bits/ 64 <735000000>;
 			opp-microvolt = <750000>;
+			opp-peak-kBps = <10400000>;
 		};
 
 		opp-763000000 {
 			opp-hz = /bits/ 64 <763000000>;
 			opp-microvolt = <762500>;
+			opp-peak-kBps = <10400000>;
 		};
 
 		opp-806000000 {
 			opp-hz = /bits/ 64 <806000000>;
 			opp-microvolt = <781250>;
+			opp-peak-kBps = <10400000>;
 		};
 
 		opp-850000000 {
 			opp-hz = /bits/ 64 <850000000>;
 			opp-microvolt = <800000>;
+			opp-peak-kBps = <10400000>;
 		};
 
 		opp-950000000 {
 			opp-hz = /bits/ 64 <950000000>;
 			opp-microvolt = <875000>;
+			opp-peak-kBps = <10400000>;
 		};
 	};
 };
 
 &gpu {
+	interconnects = <&emi_icc MASTER_MFG &emi_icc SLAVE_DDR_EMI>;
 	mali-supply = <&mt6359_vgpu11>;
 	status = "okay";
 };
 
 &{/soc} {
+	/* DVFSRC scales VCORE and DDR on its EMI monitor and the votes below, using LK's spmfw */
+	dvfsrc: system-controller@10012000 {
+		compatible = "mediatek,mt6785-dvfsrc";
+		reg = <0 0x10012000 0 0x1000>,
+		      <0 0x10230000 0 0x1000>,
+		      <0 0x10238000 0 0x2000>;
+		reg-names = "dvfsrc", "dramc-ao", "ddrphy-ao";
+		clocks = <&infracfg CLK_INFRA_DVFSRC>,
+			 <&infracfg CLK_INFRA_DRAMC_26M>;
+		clock-names = "dvfsrc", "dramc";
+		mediatek,spm = <&scpsys>;
+
+		emi_icc: interconnect {
+			compatible = "mediatek,mt6785-emi", "mediatek,mt8183-emi";
+			#interconnect-cells = <1>;
+		};
+	};
+
 	/* MT6765 register layout */
 	auxadc: adc@11001000 {
 		compatible = "mediatek,mt6785-auxadc", "mediatek,mt6765-auxadc";

@@ -1,0 +1,507 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sun, 1 Nov 2026 12:00:00 +0000
+Subject: [PATCH] soc: mediatek: mtk-dvfsrc: add MT6785
+
+Start MT6785 DVFSRC the way the vendor kernel does, with VCORE DVS and
+DDR DFS floored at DDR gear 2, and ignore requests if it fails to start
+so consumers still probe. Add the missing MODULE_DEVICE_TABLE.
+---
+diff --git a/drivers/soc/mediatek/mtk-dvfsrc.c b/drivers/soc/mediatek/mtk-dvfsrc.c
+--- a/drivers/soc/mediatek/mtk-dvfsrc.c
++++ b/drivers/soc/mediatek/mtk-dvfsrc.c
+@@ -9,10 +9,12 @@
+ #include <linux/bitfield.h>
+ #include <linux/clk.h>
+ #include <linux/iopoll.h>
++#include <linux/mfd/syscon.h>
+ #include <linux/module.h>
+ #include <linux/of.h>
+ #include <linux/of_platform.h>
+ #include <linux/platform_device.h>
++#include <linux/regmap.h>
+ #include <linux/soc/mediatek/dvfsrc.h>
+ #include <linux/soc/mediatek/mtk_sip_svc.h>
+ 
+@@ -92,6 +94,7 @@
+ 	const u8 *bw_units;
+ 	const bool has_emi_ddr;
+ 	const struct dvfsrc_opp_desc *opps_desc;
++	int (*init)(struct mtk_dvfsrc *dvfsrc);
+ 	u32 (*calc_dram_bw)(struct mtk_dvfsrc *dvfsrc, enum mtk_dvfsrc_bw_type type, u64 bw);
+ 	u32 (*get_target_level)(struct mtk_dvfsrc *dvfsrc);
+ 	u32 (*get_current_level)(struct mtk_dvfsrc *dvfsrc);
+@@ -669,13 +672,22 @@
+ 		return dev_err_probe(&pdev->dev, PTR_ERR(dvfsrc->clk),
+ 				     "Couldn't get and enable DVFSRC clock\n");
+ 
+-	arm_smccc_smc(MTK_SIP_DVFSRC_VCOREFS_CONTROL, MTK_SIP_DVFSRC_INIT,
+-		      0, 0, 0, 0, 0, 0, &ares);
+-	if (ares.a0)
+-		return dev_err_probe(&pdev->dev, -EINVAL, "DVFSRC init failed: %lu\n", ares.a0);
++	if (dvfsrc->dvd->init) {
++		/* Bandwidth consumers still have to probe if DVFSRC stays off */
++		ret = dvfsrc->dvd->init(dvfsrc);
++		if (ret == -EPROBE_DEFER)
++			return ret;
++		if (ret)
++			dev_warn(&pdev->dev, "DVFSRC not started (%d), requests are ignored\n", ret);
++	} else {
++		arm_smccc_smc(MTK_SIP_DVFSRC_VCOREFS_CONTROL, MTK_SIP_DVFSRC_INIT,
++			      0, 0, 0, 0, 0, 0, &ares);
++		if (ares.a0)
++			return dev_err_probe(&pdev->dev, -EINVAL, "DVFSRC init failed: %lu\n", ares.a0);
+ 
+-	dvfsrc->dram_type = ares.a1;
+-	dev_dbg(&pdev->dev, "DRAM Type: %d\n", dvfsrc->dram_type);
++		dvfsrc->dram_type = ares.a1;
++		dev_dbg(&pdev->dev, "DRAM Type: %d\n", dvfsrc->dram_type);
++	}
+ 
+ 	/* Newer versions of the DVFSRC MCU have pre-programmed gear tables */
+ 	if (dvfsrc->dvd->get_hw_opps) {
+@@ -691,6 +703,9 @@
+ 	if (ret)
+ 		return dev_err_probe(&pdev->dev, ret, "Failed to populate child devices\n");
+ 
++	if (dvfsrc->dvd->init)
++		return 0;
++
+ 	/* Everything is set up - make it run! */
+ 	arm_smccc_smc(MTK_SIP_DVFSRC_VCOREFS_CONTROL, MTK_SIP_DVFSRC_START,
+ 		      0, 0, 0, 0, 0, 0, &ares);
+@@ -718,6 +733,420 @@
+ 	[DVFSRC_BW_HRT] = 1023,
+ };
+ 
++/* The stock MT6785 ATF has no DVFSRC SiP, so start spmfw and DVFSRC here */
++#define MTK_SIP_SPM_FW_STATUS		MTK_SIP_SMC_CMD(0x221)
++#define MTK_SIP_SPM_VCOREFS_ARGS	MTK_SIP_SMC_CMD(0x226)
++#define MTK_SIP_SPM_ARGS		MTK_SIP_SMC_CMD(0x22a)
++
++#define MT6785_SPMFW_LOADED		1
++#define MT6785_SPMFW_KICKED		2
++#define MT6785_SPM_ARGS_SPMFW_KICK	0
++#define MT6785_VCOREFS_DVFSFW_INIT	0
++#define MT6785_VCOREFS_GO		1
++#define MT6785_VCOREFS_PWRAP_CMD	3
++
++#define MT6785_PCM_FLAG_NO_VCORE_DVS	BIT(3)
++#define MT6785_PCM_FLAG_NO_VCORE_DFS	BIT(4)
++#define MT6785_PCM_FLAG_COMMON		BIT(10)
++#define MT6785_PCM_FLAGS_FIXED		(MT6785_PCM_FLAG_NO_VCORE_DVS | \
++					 MT6785_PCM_FLAG_NO_VCORE_DFS)
++
++/* Vendor dvfsrc_enable_flag: BIT(3) keeps VCORE fixed, BIT(4) keeps DDR fixed */
++static uint mt6785_pcm_flags;
++module_param(mt6785_pcm_flags, uint, 0444);
++MODULE_PARM_DESC(mt6785_pcm_flags, "MT6785 PCM VCORE DVS/DFS-off flags");
++
++#define MT6785_SPM_PC_STA		0x1a4
++#define MT6785_SPM_SW_FLAG_0		0x600
++#define MT6785_SPM_DVFS_LEVEL		0x708
++#define MT6785_SPM_DVFS_CMD(n)		(0x710 + 4 * (n))
++#define MT6785_SPM_DVS_DFS_LEVEL	0x7bc
++
++#define MT6785_DVFSRC_BASIC_CONTROL	0x0
++#define MT6785_DVFSRC_SW_REQ3		0xc
++#define MT6785_DVFSRC_LEVEL_LABEL_0_1	0x100
++#define MT6785_DVFSRC_LEVEL_LABEL_14_15	0x11c
++#define MT6785_DVFSRC_CURRENT_LEVEL	0xd44
++#define MT6785_DVFSRC_TARGET_LEVEL	0xd48
++#define MT6785_DVFSRC_CURRENT_FORCE	0xd6c
++#define MT6785_DVFSRC_EN		(BIT(0) | BIT(8))
++#define MT6785_SW_REQ_DDR		GENMASK(14, 12)
++#define MT6785_SW_REQ_VCORE		GENMASK(6, 4)
++#define MT6785_DDR_GEAR_MAX		5
++#define MT6785_VCORE_GEAR_MAX		2
++/* Vendor DVFSRC_1600_FLOOR: DDR never drops below gear 2 (1534) */
++#define MT6785_DDR_GEAR_FLOOR		2
++
++#define MT6785_VCORE_VOSEL(uv)		DIV_ROUND_UP((uv) - 400000, 6250)
++
++struct dvfsrc_mt6785_reg {
++	u16 ofs;
++	u32 val;
++};
++
++/* helio-dvfsrc-mt6785.c dvfsrc_init_configs with DVFSRC_1600_FLOOR */
++static const struct dvfsrc_mt6785_reg dvfsrc_mt6785_init_regs[] = {
++	{ 0x0f8, 0x0000002b },	/* TIMEOUT_NEXTREQ */
++	{ 0x0c8, 0x00000002 },	/* INT_EN */
++	{ 0x280, 0x0000407c },	/* QOS_EN */
++	{ 0x078, 0x21110000 },	/* VCORE_REQUEST4 */
++	{ 0xa00, 0x00004322 },	/* DDR_REQUEST */
++	{ 0xa08, 0x00000055 },	/* DDR_REQUEST3 */
++	{ 0xa10, 0x00322000 },	/* DDR_REQUEST5 */
++	{ 0xa18, 0x54000000 },	/* DDR_REQUEST7 */
++	{ 0xcf4, 0x55000000 },	/* DDR_REQUEST8 */
++	{ 0xa34, 0x00000019 },	/* DDR_QOS0 */
++	{ 0xa38, 0x00000026 },	/* DDR_QOS1 */
++	{ 0xa3c, 0x00000033 },	/* DDR_QOS2 */
++	{ 0xa40, 0x0000004c },	/* DDR_QOS3 */
++	{ 0xa44, 0x00000066 },	/* DDR_QOS4 */
++	{ 0xd18, 0x00000077 },	/* DDR_QOS5 */
++	{ 0xd1c, 0x00000077 },	/* DDR_QOS6 */
++	{ 0x534, 0x22222220 },	/* 95MD_SCEN_BW0_T */
++	{ 0x538, 0x22222222 },	/* 95MD_SCEN_BW1_T */
++	{ 0x53c, 0x22222222 },	/* 95MD_SCEN_BW2_T */
++	{ 0x540, 0x52222222 },	/* 95MD_SCEN_BW3_T */
++	{ 0x544, 0x00000005 },	/* 95MD_SCEN_BW4 */
++	{ 0xa60, 0x0000011e },	/* HRT_REQ_UNIT */
++	{ 0xa64, 0x0000d3d3 },	/* HRT_REQ_MD_URG */
++	{ 0xa68, 0x00200802 },	/* HRT_REQ_MD_BW_0 */
++	{ 0xa6c, 0x00200800 },	/* HRT_REQ_MD_BW_1 */
++	{ 0xa70, 0x00200002 },	/* HRT_REQ_MD_BW_2 */
++	{ 0xa74, 0x00200802 },	/* HRT_REQ_MD_BW_3 */
++	{ 0xa78, 0x00400802 },	/* HRT_REQ_MD_BW_4 */
++	{ 0xa7c, 0x00601404 },	/* HRT_REQ_MD_BW_5 */
++	{ 0xa80, 0x00902008 },	/* HRT_REQ_MD_BW_6 */
++	{ 0xa84, 0x00e0380e },	/* HRT_REQ_MD_BW_7 */
++	{ 0xaa8, 0x00000000 },	/* HRT_REQ_MD_BW_8 */
++	{ 0xaac, 0x00000000 },	/* HRT_REQ_MD_BW_9 */
++	{ 0xab0, 0x00034c00 },	/* HRT_REQ_MD_BW_10 */
++	{ 0xa88, 0x0360d836 },	/* HRT1_REQ_MD_BW_0 */
++	{ 0xa8c, 0x0360d800 },	/* HRT1_REQ_MD_BW_1 */
++	{ 0xa90, 0x03600036 },	/* HRT1_REQ_MD_BW_2 */
++	{ 0xa94, 0x0360d836 },	/* HRT1_REQ_MD_BW_3 */
++	{ 0xa98, 0x0360d836 },	/* HRT1_REQ_MD_BW_4 */
++	{ 0xa9c, 0x0360d836 },	/* HRT1_REQ_MD_BW_5 */
++	{ 0xaa0, 0x0360d836 },	/* HRT1_REQ_MD_BW_6 */
++	{ 0xaa4, 0x0360d836 },	/* HRT1_REQ_MD_BW_7 */
++	{ 0xab4, 0x00000000 },	/* HRT1_REQ_MD_BW_8 */
++	{ 0xab8, 0x00000000 },	/* HRT1_REQ_MD_BW_9 */
++	{ 0xabc, 0x00034c00 },	/* HRT1_REQ_MD_BW_10 */
++	{ 0xad0, 0x070804b0 },	/* HRT_HIGH */
++	{ 0xacc, 0x11830b80 },	/* HRT_HIGH_1 */
++	{ 0xac8, 0x18a618a6 },	/* HRT_HIGH_2 */
++	{ 0xd38, 0x000018a6 },	/* HRT_HIGH_3 */
++	{ 0xadc, 0x070704af },	/* HRT_LOW */
++	{ 0xad8, 0x11820b7f },	/* HRT_LOW_1 */
++	{ 0xad4, 0x18a518a5 },	/* HRT_LOW_2 */
++	{ 0xd3c, 0x000018a5 },	/* HRT_LOW_3 */
++	{ 0xac4, 0x05554322 },	/* HRT_REQUEST */
++	{ 0x308, 0x4c4c0ab0 },	/* EMI_MON_DEBOUNCE_TIME */
++	{ 0xae0, 0x05543210 },	/* DDR_ADD_REQUEST */
++	{ 0xd74, 0x03333210 },	/* EMI_ADD_REQUEST */
++	{ 0x100, 0x40225032 },	/* LEVEL_LABEL_0_1 */
++	{ 0x104, 0x20223012 },	/* LEVEL_LABEL_2_3 */
++	{ 0x108, 0x40211012 },	/* LEVEL_LABEL_4_5 */
++	{ 0x10c, 0x20213011 },	/* LEVEL_LABEL_6_7 */
++	{ 0x110, 0x30101011 },	/* LEVEL_LABEL_8_9 */
++	{ 0x114, 0x10102000 },	/* LEVEL_LABEL_10_11 */
++	{ 0x118, 0x00000000 },	/* LEVEL_LABEL_12_13 */
++	{ 0x11c, 0x00000000 },	/* LEVEL_LABEL_14_15 */
++};
++
++/* Vendor VCORE OPP slots: 825 / 725 / 650 mV, slot 2 is the 0/1 midpoint */
++static const struct {
++	u8 slot;
++	u32 uv;
++} dvfsrc_mt6785_pwrap[] = {
++	{ 3, 825000 }, { 1, 725000 }, { 0, 650000 }, { 2, 775000 },
++};
++
++static unsigned long dvfsrc_mt6785_sip(u32 id, unsigned long a1,
++				       unsigned long a2, unsigned long a3)
++{
++	struct arm_smccc_res ares;
++
++	arm_smccc_smc(id, a1, a2, a3, 0, 0, 0, 0, &ares);
++
++	return ares.a0;
++}
++
++static u32 dvfsrc_mt6785_spm_read(struct regmap *spm, u32 reg)
++{
++	u32 val = 0;
++
++	regmap_read(spm, reg, &val);
++
++	return val;
++}
++
++/* Vendor get_dram_data_rate() on channel A; 0 if the shuffle is unknown */
++static u32 dvfsrc_mt6785_dram_rate(void __iomem *dramc, void __iomem *ddrphy,
++				   u32 *shu, u32 *pcw)
++{
++	u32 sel, ofs, div, rate;
++
++	*pcw = 0;
++	*shu = FIELD_GET(GENMASK(2, 1), readl(dramc + 0xe4));
++	if (*shu > 2)
++		return 0;
++
++	ofs = 0x500 * *shu;
++	sel = readl(ddrphy + 0x510) >> 31;
++	*pcw = readl(ddrphy + (sel ? 0xd94 : 0xd9c) + ofs);
++	div = readl(ddrphy + (sel ? 0xda0 : 0xda8) + ofs);
++
++	rate = (52 >> FIELD_GET(GENMASK(19, 18), div)) *
++	       FIELD_GET(GENMASK(31, 24), *pcw);
++	rate >>= FIELD_GET(GENMASK(2, 0), div);
++	rate >>= FIELD_GET(BIT(27), readl(ddrphy + 0xd18 + ofs));
++	if (readl(ddrphy + 0xd90 + ofs) & BIT(13))
++		rate <<= 1;
++
++	switch (rate) {
++	case 4264:
++		return 4266;
++	case 3718:
++		return 3733;
++	default:
++		return rate;
++	}
++}
++
++/* Write and read back the VCORE pwrap slots; *matched is false if any changed */
++static int dvfsrc_mt6785_set_pwrap(struct device *dev, struct regmap *spm,
++				   bool *matched)
++{
++	unsigned long a0;
++	u32 i, val;
++
++	*matched = true;
++	for (i = 0; i < ARRAY_SIZE(dvfsrc_mt6785_pwrap); i++) {
++		u32 slot = dvfsrc_mt6785_pwrap[i].slot;
++		u32 vosel = MT6785_VCORE_VOSEL(dvfsrc_mt6785_pwrap[i].uv);
++
++		val = dvfsrc_mt6785_spm_read(spm, MT6785_SPM_DVFS_CMD(slot));
++		if ((val & 0xffff) == vosel)
++			continue;
++
++		*matched = false;
++		a0 = dvfsrc_mt6785_sip(MTK_SIP_SPM_VCOREFS_ARGS,
++				       MT6785_VCOREFS_PWRAP_CMD, slot, vosel);
++		val = dvfsrc_mt6785_spm_read(spm, MT6785_SPM_DVFS_CMD(slot));
++		if ((long)a0 == SMCCC_RET_NOT_SUPPORTED || (val & 0xffff) != vosel)
++			return dev_err_probe(dev, -EIO, "pwrap slot %u: a0 %#lx cmd %#x, want %#x\n",
++					     slot, a0, val, vosel);
++	}
++
++	return 0;
++}
++
++static int dvfsrc_mt6785_init(struct mtk_dvfsrc *dvfsrc)
++{
++	struct device *dev = dvfsrc->dev;
++	struct platform_device *pdev = to_platform_device(dev);
++	void __iomem *regs = dvfsrc->regs;
++	u32 flags = mt6785_pcm_flags & MT6785_PCM_FLAGS_FIXED;
++	u32 shu, pcw, rate, shu2, pcw2, rate2, bc, val, pc, i;
++	void __iomem *dramc, *ddrphy;
++	struct resource *res;
++	struct regmap *spm;
++	unsigned long a0;
++	struct clk *clk;
++	bool matched;
++	long status;
++	int ret;
++
++	spm = syscon_regmap_lookup_by_phandle(dev->of_node, "mediatek,spm");
++	if (IS_ERR(spm))
++		return dev_err_probe(dev, PTR_ERR(spm), "No SPM regmap\n");
++
++	/* DVS with DDR pinned at shuffle 0 would undervolt the controller */
++	if (flags == MT6785_PCM_FLAG_NO_VCORE_DFS)
++		return dev_err_probe(dev, -EINVAL, "DVS without DFS is not supported\n");
++
++	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "dramc-ao");
++	if (!res)
++		return dev_err_probe(dev, -EINVAL, "No dramc-ao region\n");
++	dramc = devm_ioremap(dev, res->start, resource_size(res));
++
++	res = platform_get_resource_byname(pdev, IORESOURCE_MEM, "ddrphy-ao");
++	if (!res)
++		return dev_err_probe(dev, -EINVAL, "No ddrphy-ao region\n");
++	ddrphy = devm_ioremap(dev, res->start, resource_size(res));
++
++	if (!dramc || !ddrphy)
++		return -ENOMEM;
++
++	/* Both clocks stay on for good once the PCM runs, even on unbind */
++	clk = clk_get_optional(dev, "dramc");
++	if (IS_ERR(clk))
++		return dev_err_probe(dev, PTR_ERR(clk), "Couldn't get DRAMC clock\n");
++
++	status = (long)dvfsrc_mt6785_sip(MTK_SIP_SPM_FW_STATUS, 0, 0, 0);
++	pc = dvfsrc_mt6785_spm_read(spm, MT6785_SPM_PC_STA);
++	bc = readl(regs + MT6785_DVFSRC_BASIC_CONTROL);
++	rate = dvfsrc_mt6785_dram_rate(dramc, ddrphy, &shu, &pcw);
++	dev_info(dev, "spmfw status %ld, pcm pc %#x, dvfsrc %#x, ddr %u shu %u\n",
++		 status, pc, bc, rate, shu);
++
++	if (status != MT6785_SPMFW_LOADED || pc) {
++		ret = dev_err_probe(dev, -ENODEV, "SPM firmware not loaded or already kicked\n");
++		goto err_clk;
++	}
++	if (bc & MT6785_DVFSRC_EN) {
++		ret = dev_err_probe(dev, -EBUSY, "DVFSRC already enabled\n");
++		goto err_clk;
++	}
++	if (shu || (rate != 3733 && rate != 4266)) {
++		ret = dev_err_probe(dev, -EINVAL, "DDR not at shuffle 0\n");
++		goto err_clk;
++	}
++
++	ret = dvfsrc_mt6785_set_pwrap(dev, spm, &matched);
++	if (ret)
++		goto err_clk;
++
++	ret = clk_prepare_enable(clk);
++	if (ret)
++		goto err_clk;
++	ret = clk_prepare_enable(dvfsrc->clk);
++	if (ret)
++		goto err_clk_on;
++
++	/* The PCM owns the SPM once kicked, so nothing below unwinds */
++	a0 = dvfsrc_mt6785_sip(MTK_SIP_SPM_ARGS, MT6785_SPM_ARGS_SPMFW_KICK, 0, rate);
++	ret = regmap_read_poll_timeout(spm, MT6785_SPM_PC_STA, pc, pc, 10, 10000);
++	status = (long)dvfsrc_mt6785_sip(MTK_SIP_SPM_FW_STATUS, 0, 0, 0);
++	if (ret || status != MT6785_SPMFW_KICKED)
++		return dev_err_probe(dev, -ETIMEDOUT, "PCM kick failed: a0 %#lx status %ld pc %#x\n",
++				     a0, status, pc);
++
++	dvfsrc_mt6785_sip(MTK_SIP_SPM_VCOREFS_ARGS, MT6785_VCOREFS_DVFSFW_INIT, 0, 0);
++	dvfsrc_mt6785_sip(MTK_SIP_SPM_VCOREFS_ARGS, MT6785_VCOREFS_GO,
++			  MT6785_PCM_FLAG_COMMON | flags, 0);
++
++	val = dvfsrc_mt6785_spm_read(spm, MT6785_SPM_SW_FLAG_0);
++	dev_info(dev, "pcm pc %#x, flags %#x, dvfs level %#x, dvs/dfs level %#x\n",
++		 dvfsrc_mt6785_spm_read(spm, MT6785_SPM_PC_STA), val,
++		 dvfsrc_mt6785_spm_read(spm, MT6785_SPM_DVFS_LEVEL),
++		 dvfsrc_mt6785_spm_read(spm, MT6785_SPM_DVS_DFS_LEVEL));
++	if ((val & MT6785_PCM_FLAGS_FIXED) != flags)
++		return dev_err_probe(dev, -EIO, "PCM ignored flags %#x\n", flags);
++
++	ret = dvfsrc_mt6785_set_pwrap(dev, spm, &matched);
++	if (ret)
++		return ret;
++	if (!matched)
++		dev_warn(dev, "pwrap slots were reset by the kick, rewritten\n");
++
++	for (i = 0; i < ARRAY_SIZE(dvfsrc_mt6785_init_regs); i++)
++		writel(dvfsrc_mt6785_init_regs[i].val,
++		       regs + dvfsrc_mt6785_init_regs[i].ofs);
++
++	for (i = 0; i < ARRAY_SIZE(dvfsrc_mt6785_init_regs); i++) {
++		u32 ofs = dvfsrc_mt6785_init_regs[i].ofs;
++
++		if (ofs < MT6785_DVFSRC_LEVEL_LABEL_0_1 ||
++		    ofs > MT6785_DVFSRC_LEVEL_LABEL_14_15)
++			continue;
++
++		val = readl(regs + ofs);
++		if (val != dvfsrc_mt6785_init_regs[i].val)
++			return dev_err_probe(dev, -EIO, "DVFSRC %#x reads %#x\n", ofs, val);
++	}
++
++	/* A gear the PCM keeps fixed is held at its L0 value */
++	writel(FIELD_PREP(MT6785_SW_REQ_DDR, flags & MT6785_PCM_FLAG_NO_VCORE_DFS ?
++			  MT6785_DDR_GEAR_MAX : MT6785_DDR_GEAR_FLOOR) |
++	       FIELD_PREP(MT6785_SW_REQ_VCORE, flags & MT6785_PCM_FLAG_NO_VCORE_DVS ?
++			  MT6785_VCORE_GEAR_MAX : 0),
++	       regs + MT6785_DVFSRC_SW_REQ3);
++
++	writel(BIT(0), regs + MT6785_DVFSRC_CURRENT_FORCE);
++	writel(0x7599404b, regs + MT6785_DVFSRC_BASIC_CONTROL);
++	writel(0x7599014b, regs + MT6785_DVFSRC_BASIC_CONTROL);
++	writel(0, regs + MT6785_DVFSRC_CURRENT_FORCE);
++
++	ret = readl_poll_timeout(regs + MT6785_DVFSRC_CURRENT_LEVEL, val,
++				 val && !readl(regs + MT6785_DVFSRC_TARGET_LEVEL),
++				 10, 10000);
++	if (!ret && flags == MT6785_PCM_FLAGS_FIXED && val != BIT(0))
++		ret = -EIO;
++	if (ret) {
++		writel(bc, regs + MT6785_DVFSRC_BASIC_CONTROL);
++		return dev_err_probe(dev, ret, "DVFSRC not settled: level %#x target %#x\n",
++				     val, readl(regs + MT6785_DVFSRC_TARGET_LEVEL));
++	}
++
++	rate2 = dvfsrc_mt6785_dram_rate(dramc, ddrphy, &shu2, &pcw2);
++	if ((flags & MT6785_PCM_FLAG_NO_VCORE_DFS) && (shu2 != shu || pcw2 != pcw)) {
++		writel(bc, regs + MT6785_DVFSRC_BASIC_CONTROL);
++		dev_crit(dev, "DDR moved: shu %u pcw %#x -> shu %u pcw %#x (%u)\n",
++			 shu, pcw, shu2, pcw2, rate2);
++		return -EIO;
++	}
++
++	dev_info(dev, "running: level %#x, pcm flags %#x, ddr %u, pcm pc %#x\n",
++		 val, flags, rate2, dvfsrc_mt6785_spm_read(spm, MT6785_SPM_PC_STA));
++
++	return 0;
++
++err_clk_on:
++	clk_disable_unprepare(clk);
++err_clk:
++	clk_put(clk);
++	return ret;
++}
++
++static const struct dvfsrc_opp dvfsrc_opp_mt6785_lp4[] = {
++	{ 0, 0, 0 }, { 0, 1, 1 }, { 0, 2, 0 }, { 0, 3, 1 },
++	{ 1, 1, 1 }, { 1, 2, 2 }, { 1, 3, 1 }, { 1, 4, 2 },
++	{ 2, 1, 1 }, { 2, 2, 2 }, { 2, 3, 1 }, { 2, 4, 2 },
++	{ 2, 5, 3 },
++};
++
++static const struct dvfsrc_opp_desc dvfsrc_opp_mt6785_desc[] = {
++	[0] = {
++		.opps = dvfsrc_opp_mt6785_lp4,
++		.num_opp = ARRAY_SIZE(dvfsrc_opp_mt6785_lp4),
++	}
++};
++
++static const int dvfsrc_mt6785_regs[] = {
++	[DVFSRC_BASIC_CONTROL] = 0x0,
++	[DVFSRC_SW_REQ] = 0xc,
++	[DVFSRC_VCORE] = 0x6c,
++	/* SW_BW_0 and SW_BW_1: the hardware sums SW_BW_0..4 against DDR_QOS0..4 */
++	[DVFSRC_SW_BW] = 0x260,
++	[DVFSRC_SW_PEAK_BW] = 0x264,
++	[DVFSRC_LEVEL] = 0xd44,
++	[DVFSRC_TARGET_LEVEL] = 0xd48,
++};
++
++static const u32 dvfsrc_bw_max_constr_mt6785[DVFSRC_BW_MAX] = {
++	[DVFSRC_BW_AVG] = 255,
++	[DVFSRC_BW_PEAK] = 255,
++	[DVFSRC_BW_HRT] = 1023,
++};
++
++static const struct dvfsrc_soc_data mt6785_data = {
++	.opps_desc = dvfsrc_opp_mt6785_desc,
++	.regs = dvfsrc_mt6785_regs,
++	.init = dvfsrc_mt6785_init,
++	.calc_dram_bw = dvfsrc_calc_dram_bw_v1,
++	.get_target_level = dvfsrc_get_target_level_v2,
++	.get_current_level = dvfsrc_get_current_level_v2,
++	.get_vcore_level = dvfsrc_get_vcore_level_v2,
++	.set_dram_bw = dvfsrc_set_dram_bw_v1,
++	.set_dram_peak_bw = dvfsrc_set_dram_peak_bw_v1,
++	.set_vcore_level = dvfsrc_set_vcore_level_v2,
++	.wait_for_opp_level = dvfsrc_wait_for_opp_level_v2,
++	.wait_for_vcore_level = dvfsrc_wait_for_vcore_level_v1,
++	.bw_max_constraints = dvfsrc_bw_max_constr_mt6785,
++	.bw_min_constraints = dvfsrc_bw_min_constr_none,
++};
++
+ static const struct dvfsrc_opp dvfsrc_opp_mt6893_lp4[] = {
+ 	{ 0, 0 }, { 1, 0 }, { 2, 0 }, { 3, 0 },
+ 	{ 0, 1 }, { 1, 1 }, { 2, 1 }, { 3, 1 },
+@@ -856,12 +1285,14 @@
+ };
+ 
+ static const struct of_device_id mtk_dvfsrc_of_match[] = {
++	{ .compatible = "mediatek,mt6785-dvfsrc", .data = &mt6785_data },
+ 	{ .compatible = "mediatek,mt6893-dvfsrc", .data = &mt6893_data },
+ 	{ .compatible = "mediatek,mt8183-dvfsrc", .data = &mt8183_data },
+ 	{ .compatible = "mediatek,mt8195-dvfsrc", .data = &mt8195_data },
+ 	{ .compatible = "mediatek,mt8196-dvfsrc", .data = &mt8196_data },
+ 	{ /* sentinel */ }
+ };
++MODULE_DEVICE_TABLE(of, mtk_dvfsrc_of_match);
+ 
+ static struct platform_driver mtk_dvfsrc_driver = {
+ 	.probe	= mtk_dvfsrc_probe,
