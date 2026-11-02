@@ -1,0 +1,29 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Mon, 2 Nov 2026 12:00:00 -0800
+Subject: [PATCH] linux-dmabuf: tolerate a main device libdrm cannot describe
+
+libdrm cannot describe platform devices without an OF node, so a main
+device like mediatek-drm kept linux-dmabuf from being created. Skip the
+import checks for it, as for devices without a render node.
+
+--- a/types/wlr_linux_dmabuf_v1.c
++++ b/types/wlr_linux_dmabuf_v1.c
+@@ -892,13 +892,12 @@
+ 	}
+
+ 	drmDevice *device = NULL;
+-	if (drmGetDeviceFromDevId(feedback->main_device, 0, &device) != 0) {
+-		wlr_log_errno(WLR_ERROR, "drmGetDeviceFromDevId failed");
+-		goto error_compiled;
+-	}
+-
+ 	int main_device_fd = -1;
+-	if (device->available_nodes & (1 << DRM_NODE_RENDER)) {
++	if (drmGetDeviceFromDevId(feedback->main_device, 0, &device) != 0) {
++		// libdrm cannot describe platform devices without an OF node
++		wlr_log_errno(WLR_DEBUG, "drmGetDeviceFromDevId failed, "
++			"skipping DMA-BUF import checks");
++	} else if (device->available_nodes & (1 << DRM_NODE_RENDER)) {
+ 		const char *name = device->nodes[DRM_NODE_RENDER];
+ 		main_device_fd = open(name, O_RDWR | O_CLOEXEC);
+ 		drmFreeDevice(&device);
