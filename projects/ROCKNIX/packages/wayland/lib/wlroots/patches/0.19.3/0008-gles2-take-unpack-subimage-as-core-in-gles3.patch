@@ -1,0 +1,22 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Mon, 2 Nov 2026 12:00:00 -0800
+Subject: [PATCH] gles2: take GL_EXT_unpack_subimage as core in OpenGL ES 3
+
+GL_UNPACK_ROW_LENGTH is core in OpenGL ES 3.0, and the Android Mali blob
+returns an ES 3.2 context without listing the extension.
+
+--- a/render/gles2/renderer.c
++++ b/render/gles2/renderer.c
+@@ -551,7 +551,11 @@
+ 		free(renderer);
+ 		return NULL;
+ 	}
+-	if (!check_gl_ext(exts_str, "GL_EXT_unpack_subimage")) {
++	// GL_UNPACK_ROW_LENGTH is core in OpenGL ES 3.0
++	const char *gl_version = (const char *)glGetString(GL_VERSION);
++	bool gles3 = gl_version && strncmp(gl_version, "OpenGL ES ", 10) == 0 &&
++		gl_version[10] >= '3' && gl_version[10] <= '9';
++	if (!gles3 && !check_gl_ext(exts_str, "GL_EXT_unpack_subimage")) {
+ 		wlr_log(WLR_ERROR, "GL_EXT_unpack_subimage not supported");
+ 		free(renderer);
+ 		return NULL;
