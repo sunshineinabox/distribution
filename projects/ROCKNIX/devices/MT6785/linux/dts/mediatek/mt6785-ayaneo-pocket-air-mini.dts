@@ -221,6 +221,14 @@
 					   <125000 12>;
 	};
 
+	/* rumble motor on the MT6359 VIBR LDO, 2.2 V as stock */
+	vibrator {
+		compatible = "regulator-haptic";
+		haptic-supply = <&mt6359_vibr>;
+		min-microvolt = <2000000>;
+		max-microvolt = <2200000>;
+	};
+
 	/* gamepad power, sequenced like the stock mtk-gamepad probe */
 	gamepad_pwr: regulator-gamepad-pwr {
 		compatible = "regulator-fixed";
@@ -1106,6 +1114,13 @@
 				regulator-min-microvolt = <2800000>;
 				regulator-max-microvolt = <2800000>;
 				regulator-always-on;
+			};
+
+			mt6359_vibr: ldo_vibr {
+				regulator-name = "vibr";
+				regulator-min-microvolt = <2000000>;
+				regulator-max-microvolt = <2200000>;
+				regulator-enable-ramp-delay = <240>;
 			};
 		};
 

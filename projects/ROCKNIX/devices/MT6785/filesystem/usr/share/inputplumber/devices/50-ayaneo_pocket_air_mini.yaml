@@ -26,5 +26,10 @@ source_devices:
       handler: event*
     capability_map_id: ayaneo_pocket_air_mini
 
+  - group: gamepad
+    evdev:
+      name: regulator-haptic
+      handler: event*
+
 target_devices:
   - ds5

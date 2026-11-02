@@ -1,0 +1,20 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sun, 1 Nov 2026 13:00:00 +0000
+Subject: [PATCH] regulator: mt6359: add VIBR 2.1 V and 2.2 V
+
+Add the missing VIBR VOSEL codes 6 and 7 as 2.1 V and 2.2 V. The Pocket
+Air Mini vendor kernel runs its rumble motor at code 7.
+---
+--- a/drivers/regulator/mt6359-regulator.c
++++ b/drivers/regulator/mt6359-regulator.c
+@@ -164,8 +164,8 @@
+ };
+ 
+ static const unsigned int vibr_voltages[] = {
+-	1200000, 1300000, 1500000, 0, 1800000, 2000000, 0, 0, 2700000, 2800000,
+-	0, 3000000, 0, 3300000,
++	1200000, 1300000, 1500000, 0, 1800000, 2000000, 2100000, 2200000,
++	2700000, 2800000, 0, 3000000, 0, 3300000,
+ };
+ 
+ static const unsigned int vrf12_voltages[] = {
