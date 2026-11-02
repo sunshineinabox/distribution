@@ -33,7 +33,17 @@ post_makeinstall_target() {
     ;;
   esac
   
+  case ${DEVICE} in
+    MT6785)
+      DEFAULT_DRIVER="panfrost"
+    ;;
+    *)
+      DEFAULT_DRIVER="libmali"
+    ;;
+  esac
+
   sed -e "s/@PAN@/${PAN}/g" \
+      -e "s/@DEFAULT_DRIVER@/${DEFAULT_DRIVER}/g" \
       -i  ${INSTALL}/usr/bin/gpudriver
 
   sed -e "s/@DTB_OVERLAY_LOAD@/${DTB_OVERLAY_LOAD}/g" \

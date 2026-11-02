@@ -9,7 +9,7 @@ GPU_DRIVER_SETTING_KEY="gpu.driver"
 get_current_driver() {
   CONFDRIVER=$(get_setting ${GPU_DRIVER_SETTING_KEY})
   if [ -z ${CONFDRIVER} ]; then
-    CONFDRIVER="libmali"              # DEFAULT
+    CONFDRIVER="@DEFAULT_DRIVER@"     # DEFAULT
     set_setting ${GPU_DRIVER_SETTING_KEY} ${CONFDRIVER}
   fi
 }
@@ -25,6 +25,12 @@ load_driver() {
     "libmali")
       modprobe -r @PAN@
       modprobe mali_kbase
+
+      # Devices with their own libmali loader fall back to panfrost if it fails
+      if [ -x /usr/lib/gpudriver/libmali ]; then
+        /usr/lib/gpudriver/libmali start || load_driver panfrost
+        return
+      fi
 
       # Bind-mount mali GLES libraries over mesa if not already done.
       # Use mount output (not /proc/mounts) to avoid squashfs false positives.
