@@ -1,0 +1,106 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sun, 1 Nov 2026 19:33:11 -0800
+Subject: [PATCH 6/6] hybris: tls patcher: redirect stock bionic thread slots
+ on aarch64
+
+---
+ hybris/common/tls_patcher_aarch64.c | 82 +++++++++++++++++++++++++++++
+ 1 file changed, 82 insertions(+)
+
+diff --git a/hybris/common/tls_patcher_aarch64.c b/hybris/common/tls_patcher_aarch64.c
+index 42c9635..66f4c2d 100644
+--- a/hybris/common/tls_patcher_aarch64.c
++++ b/hybris/common/tls_patcher_aarch64.c
+@@ -47,9 +47,91 @@ struct __attribute__((__packed__)) ldr_inst {
+ };
+ _Static_assert(sizeof(struct ldr_inst) == 4, "LDR instruction size must be 4");
+ 
++#define TLS_SLOT_THREAD_ID 1
++
++#define LDR_X_MASK 0xFFC00000
++#define LDR_X 0xF9400000
++#define LDUR_X_MASK 0xFFE00C00
++#define LDUR_X 0xF8400000
++#define LDUR_IMM9_MINUS_8 0x1F8
++#define ADD_X_IMM_LSL12 0x91400000
++
++/* Zeroed stand-ins for bionic's tp[1] and tp[-1] slots, page aligned so
++ * a load of either becomes a single ADD #imm, LSL #12 */
++struct bionic_thread_stub {
++    char thread[4096];
++    char bionic_tls[28672];
++};
++static __thread __attribute__((tls_model("initial-exec"), aligned(4096)))
++    struct bionic_thread_stub bionic_thread_stub;
++
++static int is_unconditional_branch(uint32_t inst) {
++    return (inst & 0x7C000000) == 0x14000000 || (inst & 0xFE000000) == 0xD6000000;
++}
++
++static int is_store(uint32_t inst) {
++    return (inst & 0xFFC00000) == 0xF9000000 || (inst & 0xFFE00C00) == 0xF8000000 ||
++           (inst & 0xFFC00000) == 0xA9000000 || (inst & 0xFFC00000) == 0xA9800000 ||
++           (inst & 0xFFC00000) == 0xA8800000 || (inst & 0xFFC00000) == 0xB9000000;
++}
++
++static void patch_bionic_thread_slots(uint32_t* text, size_t count) {
++    static int error_reported = 0;
++    intptr_t offset = (intptr_t)&bionic_thread_stub - (intptr_t)__builtin_thread_pointer();
++    int patched = 0;
++
++    if (offset <= 0 || (offset & 0xFFF) != 0 || (offset >> 12) + 1 > 0xFFF) {
++        if (!error_reported) {
++            fprintf(stderr,
++                "HYBRIS_TLS_PATCH: bionic thread stub offset %ld can't be encoded\n",
++                (long)offset);
++            error_reported = 1;
++        }
++        return;
++    }
++    uint32_t thread_page = offset >> 12;
++    uint32_t bionic_tls_page = thread_page + sizeof(bionic_thread_stub.thread) / 4096;
++
++    for (size_t i = 0; i < count; i++) {
++        const struct mrs_inst* mrs = (const struct mrs_inst*)&text[i];
++
++        if (mrs->opcode != MRS_OPCODE || mrs->sys_reg != TPIDR_EL0) {
++            continue;
++        }
++
++        /* Follow the thread pointer until its register is overwritten */
++        for (size_t j = i + 1; j < i + 9 && j < count; j++) {
++            uint32_t inst = text[j];
++            uint32_t rn = (inst >> 5) & 0x1F, rt = inst & 0x1F;
++
++            if (is_unconditional_branch(inst)) {
++                break;
++            }
++            if (rn == mrs->rt && (inst & LDUR_X_MASK) == LDUR_X &&
++                ((inst >> 12) & 0x1FF) == LDUR_IMM9_MINUS_8) {
++                text[j] = ADD_X_IMM_LSL12 | (bionic_tls_page << 10) | (rn << 5) | rt;
++                patched++;
++            } else if (rn == mrs->rt && (inst & LDR_X_MASK) == LDR_X &&
++                       ((inst >> 10) & 0xFFF) == TLS_SLOT_THREAD_ID) {
++                text[j] = ADD_X_IMM_LSL12 | (thread_page << 10) | (rn << 5) | rt;
++                patched++;
++            } else if (is_store(inst)) {
++                continue;
++            }
++            if (rt == mrs->rt) {
++                break;
++            }
++        }
++    }
++
++    HYBRIS_DEBUG_LOG(HOOKS, "Redirected %d bionic thread slot loads", patched);
++}
++
+ void hybris_patch_tls_arch(void* segment_addr, size_t segment_size, int tls_offset) {
+     static int error_reported = 0;
+ 
++    patch_bionic_thread_slots((uint32_t*)segment_addr, segment_size / sizeof(uint32_t));
++
+     /* LDR immediate must fit in 12 bits */
+     if (tls_offset > 0xFFF) {
+         if (!error_reported) {

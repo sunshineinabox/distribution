@@ -1,0 +1,229 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: TheKit <thekit@disroot.org>
+Date: Sun, 19 Jul 2026 20:10:40 +0300
+Subject: [PATCH 2/6] linker: q: implement lazy TLS initialization for
+ StaticTls modules
+
+While Bionic's StaticTls is normally only for the main executable,
+libhybris uses it for dlopened libraries via a pre-allocated
+thread-local array. Because the libraries are dlopened, only the
+calling thread initializes its static TLS. Other existing threads need
+a way to detect and set up these new TLS segments.
+
+Add generation-aware lazy initialization with a generation check in
+tlsdesc_resolver_static. It compares the thread's DTV generation with
+the global generation; if stale, a register-preserving slow path calls
+hybris_linker_tls_init_thread.
+
+hybris_linker_tls_init_thread syncs the thread's DTV and initializes
+static TLS only for modules loaded after the thread's last sync, so it
+does not overwrite TLS data the thread already modified in older
+modules.
+---
+ .../q/bionic/libc/bionic/bionic_elf_tls.cpp   |  29 ++++-
+ .../q/bionic/libc/private/bionic_elf_tls.h    |   4 +-
+ hybris/common/q/tlsdesc_resolver.S            | 111 ++++++++++++++++++
+ 3 files changed, 142 insertions(+), 2 deletions(-)
+
+diff --git a/hybris/common/q/bionic/libc/bionic/bionic_elf_tls.cpp b/hybris/common/q/bionic/libc/bionic/bionic_elf_tls.cpp
+index 8bf5e38..bc22ed6 100644
+--- a/hybris/common/q/bionic/libc/bionic/bionic_elf_tls.cpp
++++ b/hybris/common/q/bionic/libc/bionic/bionic_elf_tls.cpp
+@@ -137,7 +137,7 @@ static void init_static_tls_segment(char* static_tls, const TlsModule& module) {
+   }
+ }
+ 
+-void __init_static_tls(void* static_tls) {
++void __init_static_tls(void* static_tls, size_t min_generation) {
+   if (static_tls == nullptr) {
+     static_tls = hybris_tls_storage;
+   }
+@@ -154,6 +154,12 @@ void __init_static_tls(void* static_tls) {
+       continue;
+     }
+ 
++    // Only initialize modules loaded after our current generation, so we don't
++    // clobber TLS data the thread already touched in older modules.
++    if (module.first_generation <= min_generation) {
++      continue;
++    }
++
+     init_static_tls_segment(static_cast<char*>(static_tls), module);
+   }
+ }
+@@ -258,6 +264,27 @@ static void update_tls_dtv(bionic_tcb* tcb) {
+   dtv->generation = atomic_load(&modules.generation);
+ }
+ 
++// Called from the tlsdesc_resolver_static slow path when a thread's DTV
++// generation is stale. Syncs the DTV, then initializes only the static
++// modules registered since this thread's last sync.
++extern "C" void hybris_linker_tls_init_thread() {
++  bionic_tcb* tcb = __get_bionic_tcb();
++  TlsDtv* dtv = __get_tcb_dtv(tcb);
++
++  size_t old_generation = (tcb->tls_slot(TLS_SLOT_DTV) != nullptr)
++    ? dtv->generation : 0;
++
++  {
++    TlsModules& modules = __libc_shared_globals()->tls_modules;
++    ScopedSignalBlocker ssb;
++    ScopedWriteLock locker(&modules.rwlock);
++    update_tls_dtv(tcb);
++  }
++
++  // dtv->generation has been updated by update_tls_dtv
++  __init_static_tls(nullptr, old_generation);
++}
++
+ __attribute__((noinline)) static void* tls_get_addr_slow_path(const TlsIndex* ti) {
+   TlsModules& modules = __libc_shared_globals()->tls_modules;
+   bionic_tcb* tcb = __get_bionic_tcb();
+diff --git a/hybris/common/q/bionic/libc/private/bionic_elf_tls.h b/hybris/common/q/bionic/libc/private/bionic_elf_tls.h
+index 868f1be..9c1d3a5 100644
+--- a/hybris/common/q/bionic/libc/private/bionic_elf_tls.h
++++ b/hybris/common/q/bionic/libc/private/bionic_elf_tls.h
+@@ -163,9 +163,11 @@ struct TlsModules {
+   CallbackHolder* thread_exit_callback_tail_node;
+ };
+ 
+-void __init_static_tls(void* static_tls);
++void __init_static_tls(void* static_tls, size_t min_generation = 0);
+ void __init_static_tls_module(size_t module_idx);
+ 
++extern "C" void hybris_linker_tls_init_thread();
++
+ // Dynamic Thread Vector. Each thread has a different DTV. For each module
+ // (executable or solib), the DTV has a pointer to that module's TLS memory. The
+ // DTV is initially empty and is allocated on-demand. It grows as more modules
+diff --git a/hybris/common/q/tlsdesc_resolver.S b/hybris/common/q/tlsdesc_resolver.S
+index 96ba135..a08b46a 100644
+--- a/hybris/common/q/tlsdesc_resolver.S
++++ b/hybris/common/q/tlsdesc_resolver.S
+@@ -35,8 +35,47 @@
+ // to the offset of the TLS symbol relative to the thread pointer.
+ 
+ ENTRY_PRIVATE(tlsdesc_resolver_static)
++  stp x19, x20, [sp, #-32]!
++  .cfi_def_cfa_offset 32
++  .cfi_rel_offset x19, 0
++  .cfi_rel_offset x20, 8
++  stp x21, x22, [sp, #16]
++  .cfi_rel_offset x21, 16
++  .cfi_rel_offset x22, 24
++
++  mrs x19, tpidr_el0            // __get_tls()
++  ldr x20, [x19, #(TLS_SLOT_DTV * 8)]
++
++  cbz x20, .static_fallback     // No DTV? Slow path.
++
++  adrp x21, __libc_tls_generation_copy
++  ldr x21, [x21, :lo12:__libc_tls_generation_copy] // Global generation
++
++  ldr x22, [x20]                // Thread generation (DTV[0])
++
++  cmp x22, x21
++  b.lo .static_fallback         // Thread generation < Global generation? Slow path.
++
++  ldp x21, x22, [sp, #16]
++  .cfi_restore x21
++  .cfi_restore x22
++  ldp x19, x20, [sp], #32
++  .cfi_adjust_cfa_offset -32
++  .cfi_restore x19
++  .cfi_restore x20
++
+   ldr x0, [x0, #8]
+   ret
++
++.static_fallback:
++  ldp x21, x22, [sp, #16]
++  .cfi_restore x21
++  .cfi_restore x22
++  ldp x19, x20, [sp], #32
++  .cfi_adjust_cfa_offset -32
++  .cfi_restore x19
++  .cfi_restore x20
++  b tlsdesc_resolver_static_slow_path
+ END(tlsdesc_resolver_static)
+ 
+ ENTRY_PRIVATE(tlsdesc_resolver_dynamic)
+@@ -188,6 +227,78 @@ ENTRY_PRIVATE(tlsdesc_resolver_dynamic_slow_path)
+   ret
+ END(tlsdesc_resolver_dynamic_slow_path)
+ 
++ENTRY_PRIVATE(tlsdesc_resolver_static_slow_path)
++  sub sp, sp, #(8 * 84)
++  .cfi_def_cfa_offset (8 * 84)
++  SAVE_GPR_PAIR(x29, x30, 0)
++  mov x29, sp
++
++  SAVE_GPR_PAIR(x1,  x2,  2)
++  SAVE_GPR_PAIR(x3,  x4,  4)
++  SAVE_GPR_PAIR(x5,  x6,  6)
++  SAVE_GPR_PAIR(x7,  x8,  8)
++  SAVE_GPR_PAIR(x9,  x10, 10)
++  SAVE_GPR_PAIR(x11, x12, 12)
++  SAVE_GPR_PAIR(x13, x14, 14)
++  SAVE_GPR_PAIR(x15, x16, 16)
++  SAVE_REG(x17, 18)
++  SAVE_REG(x0, 19) // Save TlsDescriptor*
++
++  SAVE_VEC_PAIR(q0,  q1,  20)
++  SAVE_VEC_PAIR(q2,  q3,  24)
++  SAVE_VEC_PAIR(q4,  q5,  28)
++  SAVE_VEC_PAIR(q6,  q7,  32)
++  SAVE_VEC_PAIR(q8,  q9,  36)
++  SAVE_VEC_PAIR(q10, q11, 40)
++  SAVE_VEC_PAIR(q12, q13, 44)
++  SAVE_VEC_PAIR(q14, q15, 48)
++  SAVE_VEC_PAIR(q16, q17, 52)
++  SAVE_VEC_PAIR(q18, q19, 56)
++  SAVE_VEC_PAIR(q20, q21, 60)
++  SAVE_VEC_PAIR(q22, q23, 64)
++  SAVE_VEC_PAIR(q24, q25, 68)
++  SAVE_VEC_PAIR(q26, q27, 72)
++  SAVE_VEC_PAIR(q28, q29, 76)
++  SAVE_VEC_PAIR(q30, q31, 80)
++
++  bl hybris_linker_tls_init_thread
++
++  RESTORE_REG(x0, 19) // Restore TlsDescriptor*
++  ldr x0, [x0, #8]    // Get offset from descriptor
++
++  RESTORE_REG_PAIR(q30, q31, 80)
++  RESTORE_REG_PAIR(q28, q29, 76)
++  RESTORE_REG_PAIR(q26, q27, 72)
++  RESTORE_REG_PAIR(q24, q25, 68)
++  RESTORE_REG_PAIR(q22, q23, 64)
++  RESTORE_REG_PAIR(q20, q21, 60)
++  RESTORE_REG_PAIR(q18, q19, 56)
++  RESTORE_REG_PAIR(q16, q17, 52)
++  RESTORE_REG_PAIR(q14, q15, 48)
++  RESTORE_REG_PAIR(q12, q13, 44)
++  RESTORE_REG_PAIR(q10, q11, 40)
++  RESTORE_REG_PAIR(q8,  q9,  36)
++  RESTORE_REG_PAIR(q6,  q7,  32)
++  RESTORE_REG_PAIR(q4,  q5,  28)
++  RESTORE_REG_PAIR(q2,  q3,  24)
++  RESTORE_REG_PAIR(q0,  q1,  20)
++
++  RESTORE_REG(x17, 18)
++  RESTORE_REG_PAIR(x15, x16, 16)
++  RESTORE_REG_PAIR(x13, x14, 14)
++  RESTORE_REG_PAIR(x11, x12, 12)
++  RESTORE_REG_PAIR(x9,  x10, 10)
++  RESTORE_REG_PAIR(x7,  x8,  8)
++  RESTORE_REG_PAIR(x5,  x6,  6)
++  RESTORE_REG_PAIR(x3,  x4,  4)
++  RESTORE_REG_PAIR(x1,  x2,  2)
++
++  RESTORE_REG_PAIR(x29, x30, 0)
++  add sp, sp, #(8 * 84)
++  .cfi_def_cfa_offset 0
++  ret
++END(tlsdesc_resolver_static_slow_path)
++
+ // The address of an unresolved weak TLS symbol evaluates to NULL with TLSDESC.
+ // The value returned by this function is added to the thread pointer, so return
+ // a negated thread pointer to cancel it out.

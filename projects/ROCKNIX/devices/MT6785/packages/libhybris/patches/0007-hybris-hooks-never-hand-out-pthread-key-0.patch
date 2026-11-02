@@ -1,0 +1,42 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sun, 1 Nov 2026 20:14:58 -0800
+Subject: [PATCH 7/7] hybris: hooks: never hand out pthread key 0
+
+---
+ hybris/common/hooks.c | 15 ++++++++++++++-
+ 1 file changed, 14 insertions(+), 1 deletion(-)
+
+diff --git a/hybris/common/hooks.c b/hybris/common/hooks.c
+index e67afdb..cc70a4a 100644
+--- a/hybris/common/hooks.c
++++ b/hybris/common/hooks.c
+@@ -449,6 +449,19 @@ static int _hybris_hook_pthread_setspecific(pthread_key_t key, const void *ptr)
+     return pthread_setspecific(key, ptr);
+ }
+ 
++static int _hybris_hook_pthread_key_create(pthread_key_t *key, void (*destructor)(void *))
++{
++    int ret = pthread_key_create(key, destructor);
++
++    TRACE_HOOK("key %d", ret == 0 ? (int)*key : -1);
++
++    /* _hybris_hook_pthread_getspecific treats key 0 as never created */
++    if (ret == 0 && *key == 0)
++        ret = pthread_key_create(key, destructor);
++
++    return ret;
++}
++
+ static void* _hybris_hook_pthread_getspecific(pthread_key_t key)
+ {
+     TRACE_HOOK("key %d", key);
+@@ -3091,7 +3104,7 @@ static struct _hook hooks_common[] = {
+     HOOK_DIRECT_NO_DEBUG(pthread_getname_np),
+     HOOK_INDIRECT(pthread_setname_np),
+     HOOK_DIRECT_NO_DEBUG(pthread_once),
+-    HOOK_DIRECT_NO_DEBUG(pthread_key_create),
++    HOOK_INDIRECT(pthread_key_create),
+     HOOK_DIRECT(pthread_setspecific),
+     HOOK_INDIRECT(pthread_getspecific),
+     HOOK_INDIRECT(pthread_attr_init),

@@ -1,0 +1,157 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: TheKit <thekit@disroot.org>
+Date: Sun, 19 Jul 2026 20:12:51 +0300
+Subject: [PATCH 3/6] linker: q: move DTV pointer out of raw TLS slot into
+ linker TLS
+
+Storing the bionic DTV pointer in TLS_SLOT_DTV writes to a fixed offset
+from the glibc thread pointer (tp+16 for slot 2 on arm64), which is
+where glibc places the first static TLS block. When the main executable
+or an early-loaded library has TLS data there, the DTV write corrupts
+it, and conversely the resolvers read garbage instead of a DTV on
+threads that haven't initialized theirs.
+
+Keep the DTV pointer in a dedicated initial-exec __thread variable in
+the linker instead. A single pointer always fits glibc's static TLS
+surplus, so this works regardless of how libhybris is loaded. C++ code
+accesses the variable directly; the TLSDESC resolvers reach it through
+an initial-exec GOTTPREL relocation, so glibc fills in its
+thread-pointer offset at load time, the same mechanism the C++ accesses
+use. No hand-maintained offset or startup computation is needed.
+
+Like TLS_SLOT_DTV, the slot points at TlsDtv::generation so the
+resolver fast path stays the same. The TLS slot machinery no longer
+uses TLS_SLOT_DTV at all.
+---
+ .../q/bionic/libc/bionic/bionic_elf_tls.cpp       | 12 ++++++------
+ .../q/bionic/libc/bionic/pthread_internal.h       | 15 +++++++++++----
+ hybris/common/q/linker_tls.cpp                    |  9 +++++++++
+ hybris/common/q/tlsdesc_resolver.S                | 10 +++++++---
+ 4 files changed, 33 insertions(+), 13 deletions(-)
+
+diff --git a/hybris/common/q/bionic/libc/bionic/bionic_elf_tls.cpp b/hybris/common/q/bionic/libc/bionic/bionic_elf_tls.cpp
+index bc22ed6..e713932 100644
+--- a/hybris/common/q/bionic/libc/bionic/bionic_elf_tls.cpp
++++ b/hybris/common/q/bionic/libc/bionic/bionic_elf_tls.cpp
+@@ -204,8 +204,8 @@ static void update_tls_dtv(bionic_tcb* tcb) {
+   const TlsModules& modules = __libc_shared_globals()->tls_modules;
+   BionicAllocator& allocator = __libc_shared_globals()->tls_allocator;
+ 
+-  // If DTV hasn't been ever initialized, TLS_SLOT_DTV should be NULL
+-  const bool has_dtv = tcb->tls_slot(TLS_SLOT_DTV) != nullptr;
++  // If DTV hasn't been ever initialized, the DTV slot should be NULL
++  const bool has_dtv = hybris_dtv_slot != nullptr;
+ 
+   // Use the generation counter from the shared globals instead of the local
+   // copy, which won't be initialized yet if __tls_get_addr is called before
+@@ -271,7 +271,7 @@ extern "C" void hybris_linker_tls_init_thread() {
+   bionic_tcb* tcb = __get_bionic_tcb();
+   TlsDtv* dtv = __get_tcb_dtv(tcb);
+ 
+-  size_t old_generation = (tcb->tls_slot(TLS_SLOT_DTV) != nullptr)
++  size_t old_generation = (hybris_dtv_slot != nullptr)
+     ? dtv->generation : 0;
+ 
+   {
+@@ -327,9 +327,9 @@ __attribute__((noinline)) static void* tls_get_addr_slow_path(const TlsIndex* ti
+ // TLS_GET_ADDR_CCONV is unset. 32-bit x86 uses ___tls_get_addr instead and a
+ // regparm() calling convention.
+ extern "C" void* TLS_GET_ADDR(const TlsIndex* ti) TLS_GET_ADDR_CCONV {
+-  // hybris: TLS_SLOT_DTV of thread local storage might be uninitialized
++  // hybris: the DTV slot might be uninitialized on this thread
+   bionic_tcb* tcb = __get_bionic_tcb();
+-  if (tcb->tls_slot(TLS_SLOT_DTV) == nullptr)
++  if (hybris_dtv_slot == nullptr)
+     return tls_get_addr_slow_path(ti);
+ 
+   TlsDtv* dtv = __get_tcb_dtv(tcb);
+@@ -390,7 +390,7 @@ void __free_dynamic_tls(bionic_tcb* tcb) {
+   }
+ 
+   // Clear the DTV slot. The DTV must not be used again with this thread.
+-  tcb->tls_slot(TLS_SLOT_DTV) = nullptr;
++  hybris_dtv_slot = nullptr;
+ }
+ 
+ // Invokes all the registered thread_exit callbacks, if any.
+diff --git a/hybris/common/q/bionic/libc/bionic/pthread_internal.h b/hybris/common/q/bionic/libc/bionic/pthread_internal.h
+index fe315eb..dfddf82 100644
+--- a/hybris/common/q/bionic/libc/bionic/pthread_internal.h
++++ b/hybris/common/q/bionic/libc/bionic/pthread_internal.h
+@@ -182,13 +182,20 @@ static inline  bionic_tls& __get_bionic_tls() {
+   return *static_cast<bionic_tls*>(__get_tls()[TLS_SLOT_BIONIC_TLS]);
+ }
+ 
+-static inline  TlsDtv* __get_tcb_dtv(bionic_tcb* tcb) {
+-  uintptr_t dtv_slot = reinterpret_cast<uintptr_t>(tcb->tls_slot(TLS_SLOT_DTV));
++// hybris: the DTV pointer is kept in the linker's own initial-exec TLS
++// (see linker_tls.cpp) rather than in a raw bionic TLS slot, which would
++// alias glibc TLS data relative to the thread pointer. Like the original
++// TLS_SLOT_DTV, it points at TlsDtv::generation, so the TLSDESC resolver
++// fast path can index modules without an extra add.
++extern "C" __attribute__((tls_model("initial-exec"))) __thread void* hybris_dtv_slot;
++
++static inline  TlsDtv* __get_tcb_dtv(bionic_tcb* tcb __attribute__((unused))) {
++  uintptr_t dtv_slot = reinterpret_cast<uintptr_t>(hybris_dtv_slot);
+   return reinterpret_cast<TlsDtv*>(dtv_slot - offsetof(TlsDtv, generation));
+ }
+ 
+-static inline void __set_tcb_dtv(bionic_tcb* tcb, TlsDtv* val) {
+-  tcb->tls_slot(TLS_SLOT_DTV) = &val->generation;
++static inline void __set_tcb_dtv(bionic_tcb* tcb __attribute__((unused)), TlsDtv* val) {
++  hybris_dtv_slot = &val->generation;
+ }
+ 
+ extern "C" __LIBC_HIDDEN__ int __set_tls(void* ptr);
+diff --git a/hybris/common/q/linker_tls.cpp b/hybris/common/q/linker_tls.cpp
+index d651f85..b4d1207 100644
+--- a/hybris/common/q/linker_tls.cpp
++++ b/hybris/common/q/linker_tls.cpp
+@@ -64,6 +64,15 @@ extern "C" __attribute__((tls_model ("initial-exec"))) __thread void* hybris_tls
+ ssize_t g_hybris_static_tls_tp_offset = 0;
+ size_t tls_tp_base = 0;
+ 
++// hybris: per-thread bionic DTV pointer. Lives in the linker's own
++// initial-exec TLS instead of a raw bionic TLS slot: slots are relative to
++// the glibc thread pointer, and writing e.g. slot 2 (tp+16 on arm64) can
++// alias TLS data of the main executable or an early-loaded library. Being a
++// single pointer, it always fits glibc's static TLS surplus even though the
++// linker is dlopened. The TLSDESC resolvers reach it through an initial-exec
++// GOTTPREL relocation (see tlsdesc_resolver.S), same as this C++ access.
++extern "C" __attribute__((tls_model("initial-exec"))) __thread void* hybris_dtv_slot = nullptr;
++
+ // hybris: StaticTlsLayout only ever hands out fresh offsets, which is fine for
+ // bionic, where static TLS modules are never unloaded. Blobs here can be
+ // dlclosed, so keep the ranges their modules leave behind and hand them out
+diff --git a/hybris/common/q/tlsdesc_resolver.S b/hybris/common/q/tlsdesc_resolver.S
+index a08b46a..7445e2f 100644
+--- a/hybris/common/q/tlsdesc_resolver.S
++++ b/hybris/common/q/tlsdesc_resolver.S
+@@ -44,7 +44,9 @@ ENTRY_PRIVATE(tlsdesc_resolver_static)
+   .cfi_rel_offset x22, 24
+ 
+   mrs x19, tpidr_el0            // __get_tls()
+-  ldr x20, [x19, #(TLS_SLOT_DTV * 8)]
++  adrp x20, :gottprel:hybris_dtv_slot
++  ldr x20, [x20, #:gottprel_lo12:hybris_dtv_slot] // IE TP offset, filled by glibc
++  ldr x20, [x19, x20]           // hybris DTV slot (&TlsDtv::generation)
+ 
+   cbz x20, .static_fallback     // No DTV? Slow path.
+ 
+@@ -88,12 +90,14 @@ ENTRY_PRIVATE(tlsdesc_resolver_dynamic)
+   .cfi_rel_offset x22, 24
+ 
+   mrs x19, tpidr_el0            // __get_tls()
+-  ldr x20, [x19, #(TLS_SLOT_DTV * 8)]
++  adrp x20, :gottprel:hybris_dtv_slot
++  ldr x20, [x20, #:gottprel_lo12:hybris_dtv_slot] // IE TP offset, filled by glibc
++  ldr x20, [x19, x20]           // hybris DTV slot (&TlsDtv::generation)
+ 
+   ldr x0, [x0, #8]              // TlsDynamicResolverArg*
+   ldr x22, [x0]                 // TlsDynamicResolverArg::generation
+ 
+-  cbz x20, .fallback            // hybris: TLS_SLOT_DTV might be uninitialized
++  cbz x20, .fallback            // hybris: DTV slot might be uninitialized
+   ldr x21, [x20]                // TlsDtv::generation
+ 
+   cmp x21, x22
