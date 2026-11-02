@@ -1,0 +1,22 @@
+# Android linker namespaces for libhybris, which poses as /vendor/bin/yes. Vendor code sees
+# the vendor VNDK and reaches system libraries only through the LL-NDK, as on Android.
+dir.vendor = /vendor/bin/
+
+[vendor]
+additional.namespaces = system,sphal
+
+# The vendor GLES blob is loaded here
+namespace.default.isolated = false
+namespace.default.search.paths = /vendor/${LIB}/egl:/vendor/${LIB}/hw:/vendor/${LIB}:/apex/com.android.vndk.v30/${LIB}
+namespace.default.links = system
+namespace.default.link.system.shared_libs = libc.so:libdl.so:libbinder_ndk.so:libcgrouprc.so:libdl_android.so:libm.so:liblog.so:libnativewindow.so:libsync.so:libvndksupport.so:libvulkan.so:libEGL.so:libGLESv1_CM.so:libGLESv2.so:libGLESv3.so:libmediandk.so:libneuralnetworks.so:libselinux.so:libft2.so:libandroid_net.so
+
+namespace.system.isolated = false
+namespace.system.search.paths = /run/hybris-mali/system/${LIB}:/apex/com.android.runtime/${LIB}/bionic
+
+# Android's Vulkan loader only opens the HAL through the exported sphal namespace
+namespace.sphal.isolated = false
+namespace.sphal.visible = true
+namespace.sphal.search.paths = /vendor/${LIB}/egl:/vendor/${LIB}/hw:/vendor/${LIB}:/apex/com.android.vndk.v30/${LIB}
+namespace.sphal.links = system
+namespace.sphal.link.system.shared_libs = libc.so:libdl.so:libbinder_ndk.so:libcgrouprc.so:libdl_android.so:libm.so:liblog.so:libnativewindow.so:libsync.so:libvndksupport.so:libvulkan.so:libEGL.so:libGLESv1_CM.so:libGLESv2.so:libGLESv3.so:libmediandk.so:libneuralnetworks.so:libselinux.so:libft2.so:libandroid_net.so

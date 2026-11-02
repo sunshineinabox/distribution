@@ -1,0 +1,57 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026-present ROCKNIX (https://github.com/ROCKNIX)
+
+# gpudriver libmali: the device's own stock Mali blob through libhybris.
+# A failed start is undone so gpudriver can load the open driver instead.
+
+H=/usr/lib/hybris-mali
+ACTIVE=/run/hybris-mali/active
+
+# The EGL Wayland shim and libhybris' GLES in place of glvnd's dispatch libraries
+overrides() {
+  echo "${H}/libEGL.so.1 /usr/lib/libEGL.so.1"
+  echo "/usr/lib/libhybris/libGLESv2.so.2 /usr/lib/libGLESv2.so.2"
+  echo "/usr/lib/libhybris/libGLESv1_CM.so.1 /usr/lib/libGLESv1_CM.so.1"
+}
+
+stop() {
+  rm -f ${ACTIVE}
+  systemctl unset-environment WLR_RENDERER
+  for icd in /usr/share/vulkan/icd.d/panfrost_icd.*.json; do
+    umount "${icd}" 2>/dev/null
+  done
+  overrides | while read src dst; do
+    umount "${dst}" 2>/dev/null
+  done
+  python3 ${H}/android-mount stop
+}
+
+start() {
+  python3 ${H}/android-mount start || return 1
+  overrides | while read src dst; do
+    mount --bind "${src}" "${dst}" || exit 1
+  done || return 1
+  (. ${H}/env && timeout 30 ${H}/egl-check) || return 1
+
+  # PanVK needs the open kernel driver
+  for icd in /usr/share/vulkan/icd.d/panfrost_icd.*.json; do
+    [ -f "${icd}" ] && mount --bind /dev/null "${icd}"
+  done
+  # Without a Mesa GPU, sway composites on the CPU
+  systemctl set-environment WLR_RENDERER=pixman
+  touch ${ACTIVE}
+}
+
+case "$1" in
+  start)
+    start || { stop; exit 1; }
+    ;;
+  stop)
+    stop
+    ;;
+  *)
+    echo "usage: $0 start|stop" >&2
+    exit 2
+    ;;
+esac

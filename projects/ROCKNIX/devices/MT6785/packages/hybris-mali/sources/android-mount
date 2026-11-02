@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026-present ROCKNIX (https://github.com/ROCKNIX)
+
+# Mount the device's own Android system (under /run/hybris-mali, /system is
+# ROCKNIX's), vendor and APEXes read-only, and build the bionic property area.
+# android-mount start|stop
+
+import os
+import struct
+import subprocess
+import sys
+import time
+import zipfile
+
+SUPER = '/dev/disk/by-partlabel/super'
+MISC = '/dev/disk/by-partlabel/misc'
+RUN = '/run/hybris-mali'
+SYSTEM_ROOT = RUN + '/system-root'
+SYSTEM = RUN + '/system'
+VENDOR = '/vendor'
+APEX = '/apex'
+PROPERTIES = '/dev/__properties__'
+
+# liblp: geometry at 4096, metadata slots from 12288
+LP_GEOMETRY_MAGIC = 0x616c4467
+LP_HEADER_MAGIC = 0x414c5030
+LP_METADATA_OFFSET = 4096 + 2 * 4096
+
+
+def log(msg):
+    print('android-mount: ' + msg, file=sys.stderr)
+
+
+def run(*cmd):
+    return subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+
+def active_slot():
+    for arg in open('/proc/cmdline').read().split():
+        if arg.startswith('androidboot.slot_suffix='):
+            return arg.split('=', 1)[1]
+    # AOSP bootloader_control in misc: slot_suffix[4], magic 'BCAB'
+    try:
+        with open(MISC, 'rb') as f:
+            f.seek(2048)
+            ctl = f.read(8)
+        if ctl[4:8] == b'BCAB' and ctl[:2] in (b'_a', b'_b'):
+            return ctl[:2].decode()
+    except OSError:
+        pass
+    return '_a'
+
+
+def lp_partitions(slot_index):
+    """{name: [(target_type, source, byte offset, byte length)]} from one super metadata slot"""
+    with open(SUPER, 'rb') as f:
+        f.seek(4096)
+        geometry = f.read(52)
+        magic, = struct.unpack_from('<I', geometry)
+        max_size, slots = struct.unpack_from('<II', geometry, 40)
+        if magic != LP_GEOMETRY_MAGIC:
+            raise OSError('no LP geometry on super')
+        f.seek(LP_METADATA_OFFSET + min(slot_index, slots - 1) * max_size)
+        header = f.read(256)
+        magic, _, _, header_size = struct.unpack_from('<IHHI', header)
+        if magic != LP_HEADER_MAGIC:
+            raise OSError('no LP metadata on super')
+        tables_size, = struct.unpack_from('<I', header, 44)
+        p_off, p_num, p_size = struct.unpack_from('<III', header, 80)
+        e_off, _, e_size = struct.unpack_from('<III', header, 92)
+        f.seek(LP_METADATA_OFFSET + min(slot_index, slots - 1) * max_size + header_size)
+        tables = f.read(tables_size)
+    parts = {}
+    for i in range(p_num):
+        entry = p_off + i * p_size
+        name = tables[entry:entry + 36].split(b'\0')[0].decode()
+        first, count = struct.unpack_from('<II', tables, entry + 40)
+        extents = []
+        for k in range(count):
+            sectors, ttype, data, source = struct.unpack_from('<QIQI', tables, e_off + (first + k) * e_size)
+            extents.append((ttype, source, data * 512, sectors * 512))
+        parts[name] = extents
+    return parts
+
+
+def linear_offset(parts, name):
+    """byte offset of a partition that is one linear extent on super, else None"""
+    extents = parts.get(name, [])
+    if len(extents) != 1 or extents[0][0] != 0 or extents[0][1] != 0:
+        return None
+    return extents[0][2]
+
+
+def mount_ext4(source, target, offset):
+    os.makedirs(target, exist_ok=True)
+    if os.path.isfile(source):
+        return run('mount', '-t', 'ext4', '-o', 'ro,noload,loop,offset=%d' % offset, source, target)
+    # busybox mount only sets up a loop device itself for regular files
+    loop = subprocess.run(['losetup', '-f'], capture_output=True, text=True).stdout.strip()
+    if not loop or not run('losetup', '-r', '-o', str(offset), loop, source):
+        return False
+    if run('mount', '-t', 'ext4', '-o', 'ro,noload', loop, target):
+        return True
+    run('losetup', '-d', loop)
+    return False
+
+
+def apex_payload_offset(apex):
+    """APEXes are zips whose ext4 payload is stored uncompressed"""
+    info = zipfile.ZipFile(apex).getinfo('apex_payload.img')
+    if info.compress_type != zipfile.ZIP_STORED:
+        raise OSError('%s: compressed payload' % apex)
+    with open(apex, 'rb') as f:
+        f.seek(info.header_offset)
+        name_len, extra_len = struct.unpack_from('<HH', f.read(30), 26)
+    return info.header_offset + 30 + name_len + extra_len
+
+
+def read_props(*files):
+    props = {}
+    for path in files:
+        try:
+            lines = open(path, errors='replace').read().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith('#') and '=' in line:
+                key, value = line.split('=', 1)
+                props.setdefault(key.strip(), value.strip())
+    return props
+
+
+def write_property_area(path, props):
+    """Pre-split bionic prop_area: one file, a trie of prop_bt nodes and prop_info entries"""
+    size, header = 128 * 1024, 128
+    value_max = 92
+    data = bytearray(size - header)
+    used = [20]                         # root prop_bt, empty name
+
+    def alloc(n):
+        off = used[0]
+        used[0] += (n + 3) & ~3
+        if used[0] > len(data):
+            raise OSError('property area full')
+        return off
+
+    def node_name(off):
+        return bytes(data[off + 20:off + 20 + struct.unpack_from('<I', data, off)[0]])
+
+    def child(parent, segment):
+        seg = segment.encode()
+        slot = parent + 16              # children
+        while True:
+            cur = struct.unpack_from('<I', data, slot)[0]
+            if cur == 0:
+                cur = alloc(20 + len(seg) + 1)
+                struct.pack_into('<I', data, cur, len(seg))
+                data[cur + 20:cur + 20 + len(seg)] = seg
+                struct.pack_into('<I', data, slot, cur)
+                return cur
+            name = node_name(cur)
+            if seg == name:
+                return cur
+            shorter = len(seg) < len(name) or (len(seg) == len(name) and seg < name)
+            slot = cur + (8 if shorter else 12)
+
+    for key, value in props.items():
+        if not key or len(key) >= 256:
+            continue
+        node = 0
+        for segment in key.split('.'):
+            node = child(node, segment)
+        if struct.unpack_from('<I', data, node + 4)[0]:
+            continue
+        k, v = key.encode(), value.encode()[:value_max - 1]
+        info = alloc(4 + value_max + len(k) + 1)
+        struct.pack_into('<I', data, info, len(v) << 24)
+        data[info + 4:info + 4 + len(v)] = v
+        data[info + 4 + value_max:info + 4 + value_max + len(k)] = k
+        struct.pack_into('<I', data, node + 4, info)
+
+    with open(path, 'wb') as f:
+        f.write(struct.pack('<IIII', used[0], 0, 0x504f5250, 0xfc6ed0ab) + bytes(header - 16) + bytes(data))
+    os.chmod(path, 0o644)
+
+
+def mount_slot(slot):
+    parts = lp_partitions(0 if slot == '_a' else 1)
+    system, vendor = linear_offset(parts, 'system' + slot), linear_offset(parts, 'vendor' + slot)
+    if system is None or vendor is None:
+        log('slot %s: system or vendor is not one linear extent on super' % slot)
+        return False
+    # system-as-root: the image root holds /system
+    if not mount_ext4(SUPER, SYSTEM_ROOT, system):
+        log('slot %s: cannot mount system' % slot)
+        return False
+    if not mount_ext4(SUPER, VENDOR, vendor):
+        log('slot %s: cannot mount vendor' % slot)
+        stop()
+        return False
+    if os.path.islink(SYSTEM):
+        os.unlink(SYSTEM)
+    os.symlink('system-root/system', SYSTEM)
+    return True
+
+
+def start():
+    os.makedirs(RUN, exist_ok=True)
+    active = active_slot()
+    for slot in (active, '_b' if active == '_a' else '_a'):
+        if mount_slot(slot):
+            break
+    else:
+        return 1
+
+    vendor_props = read_props(VENDOR + '/build.prop')
+    vndk = vendor_props.get('ro.vndk.version', vendor_props.get('ro.vendor.build.version.sdk', '30'))
+    # A system of the vendor's own release ships vndk.current, a GSI one APEX per VNDK version
+    vndk_apexes = ['%s/%s/com.android.vndk.v%s.apex' % (SYSTEM, d, vndk)
+                   for d in ('apex', 'system_ext/apex', 'product/apex')]
+    vndk_apexes.append(SYSTEM + '/apex/com.android.vndk.current.apex')
+    vndk_apex = next((p for p in vndk_apexes if os.path.isfile(p)), vndk_apexes[-1])
+    if not run('mount', '-t', 'tmpfs', '-o', 'mode=755,size=64k', 'tmpfs', APEX):
+        return 1
+    for path, target in ((SYSTEM + '/apex/com.android.runtime.apex', 'com.android.runtime'),
+                         (vndk_apex, 'com.android.vndk.v' + vndk)):
+        try:
+            offset = apex_payload_offset(path)
+        except (OSError, KeyError, zipfile.BadZipFile) as e:
+            log('%s: %s' % (path, e))
+            return 1
+        if not mount_ext4(path, '%s/%s' % (APEX, target), offset):
+            log('cannot mount %s' % path)
+            return 1
+
+    props = read_props(SYSTEM + '/build.prop', VENDOR + '/build.prop')
+    props.setdefault('ro.vndk.version', vndk)
+    write_property_area(PROPERTIES, props)
+    log('slot %s, %d properties' % (slot, len(props)))
+    return 0
+
+
+def stop():
+    if os.path.ismount(APEX):
+        for name in os.listdir(APEX):
+            run('umount', '-d', '%s/%s' % (APEX, name))
+        run('umount', APEX)
+    if os.path.ismount(VENDOR):
+        run('umount', '-d', VENDOR)
+    # the APEX loop devices let go of their files asynchronously
+    for _ in range(10):
+        if not os.path.ismount(SYSTEM_ROOT) or run('umount', '-d', SYSTEM_ROOT):
+            break
+        time.sleep(0.2)
+    if os.path.islink(SYSTEM):
+        os.unlink(SYSTEM)
+    if os.path.exists(PROPERTIES):
+        os.unlink(PROPERTIES)
+    return 0
+
+
+if __name__ == '__main__':
+    command = sys.argv[1] if len(sys.argv) > 1 else ''
+    if command == 'start':
+        try:
+            status = start()
+        except OSError as e:
+            log(str(e))
+            status = 1
+        if status:
+            stop()
+        sys.exit(status)
+    elif command == 'stop':
+        sys.exit(stop())
+    print('usage: android-mount start|stop', file=sys.stderr)
+    sys.exit(2)
