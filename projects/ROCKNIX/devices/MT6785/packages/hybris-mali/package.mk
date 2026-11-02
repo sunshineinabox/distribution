@@ -6,14 +6,18 @@ PKG_VERSION=""
 PKG_LICENSE="Apache-2.0"
 PKG_SITE=""
 PKG_URL=""
-PKG_DEPENDS_TARGET="toolchain android-headers libhybris wayland mesa libdrm gpudriver"
+PKG_DEPENDS_TARGET="toolchain android-headers libhybris wayland wayland-protocols mesa libdrm gpudriver"
 PKG_LONGDESC="gpudriver libmali: the stock Mali blob of the device's own Android system through libhybris"
 PKG_TOOLCHAIN="manual"
 
 make_target() {
+  local DMABUF_XML=${SYSROOT_PREFIX}/usr/share/wayland-protocols/stable/linux-dmabuf/linux-dmabuf-v1.xml
+
+  ${TOOLCHAIN}/bin/wayland-scanner client-header ${DMABUF_XML} linux-dmabuf-v1-client-protocol.h
+  ${TOOLCHAIN}/bin/wayland-scanner private-code ${DMABUF_XML} linux-dmabuf-v1-protocol.c
   ${CC} ${CFLAGS} -fPIC -shared -fvisibility=hidden -Wl,-soname,libEGL.so.1 \
-    -I${SYSROOT_PREFIX}/usr/include/android \
-    -o libEGL.so.1 egl-wayland-shim.c hybris-gralloc.c \
+    -I. -I${SYSROOT_PREFIX}/usr/include/android \
+    -o libEGL.so.1 egl-wayland-shim.c hybris-gralloc.c linux-dmabuf-v1-protocol.c \
     ${LDFLAGS} -lwayland-client -ldl -lpthread
   ${CC} ${CFLAGS} -fPIC -shared -fvisibility=hidden -Wl,-soname,libgbm.so.1 \
     -o libgbm.so.1 gbm.c -I${SYSROOT_PREFIX}/usr/include/libdrm ${LDFLAGS} -ldrm
