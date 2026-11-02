@@ -1,0 +1,30 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sun, 1 Nov 2026 14:00:00 +0000
+Subject: [PATCH] mali_kbase: jd: accept the MediaTek atom stride
+
+MediaTek's r25p0 userspace is built with MTK_GPU_BM_2, which appends a
+u32 frame_nr to base_jd_atom. Accept that 72-byte stride and copy only
+the fields this kernel knows.
+---
+--- a/product/kernel/drivers/gpu/arm/midgard/mali_kbase_jd.c
++++ b/product/kernel/drivers/gpu/arm/midgard/mali_kbase_jd.c
+@@ -1031,7 +1031,9 @@
+ 		return -EINVAL;
+ 	}
+ 
+-	if (stride != sizeof(struct base_jd_atom_v2) && stride != sizeof(struct base_jd_atom)) {
++	/* MediaTek r25p0 userspace appends a u32 frame_nr (MTK_GPU_BM_2) padded to 8 bytes */
++	if (stride != sizeof(struct base_jd_atom_v2) && stride != sizeof(struct base_jd_atom) &&
++	    stride != sizeof(struct base_jd_atom) + 8) {
+ 		dev_err(kbdev->dev,
+ 			"Stride %u passed to job_submit isn't supported by the kernel\n", stride);
+ 		return -EINVAL;
+@@ -1065,7 +1067,7 @@
+ 			/* no seq_nr in v2 */
+ 			user_atom.seq_nr = 0;
+ 		} else {
+-			if (copy_from_user(&user_atom, user_addr, stride) != 0) {
++			if (copy_from_user(&user_atom, user_addr, sizeof(user_atom)) != 0) {
+ 				dev_dbg(kbdev->dev,
+ 					"Invalid atom address %pK passed to job_submit\n",
+ 					user_addr);

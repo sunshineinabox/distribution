@@ -1,0 +1,71 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Fri, 31 Oct 2026 23:00:00 +0000
+Subject: [PATCH] mali_kbase: devicetree: attach every power domain
+
+MediaTek GPUs list one power domain per shader core, but the devicetree
+platform leaves power domains to the driver core, which only attaches a
+lone one. Attach them all with runtime PM device links when there is
+more than one, as panfrost does.
+---
+ .../devicetree/mali_kbase_config_devicetree.c | 22 +++++++++++++++++++
+ .../devicetree/mali_kbase_config_platform.h   |  3 ++-
+ 2 files changed, 24 insertions(+), 1 deletion(-)
+
+diff --git a/product/kernel/drivers/gpu/arm/midgard/platform/devicetree/mali_kbase_config_devicetree.c b/product/kernel/drivers/gpu/arm/midgard/platform/devicetree/mali_kbase_config_devicetree.c
+index fba351b..a3d81c1 100644
+--- a/product/kernel/drivers/gpu/arm/midgard/platform/devicetree/mali_kbase_config_devicetree.c
++++ b/product/kernel/drivers/gpu/arm/midgard/platform/devicetree/mali_kbase_config_devicetree.c
+@@ -23,6 +23,9 @@
+ #include <mali_kbase_config.h>
+ #include <backend/gpu/mali_kbase_pm_internal.h>
+ 
++#include <linux/of.h>
++#include <linux/pm_domain.h>
++
+ static struct kbase_platform_config dummy_platform_config;
+ 
+ struct kbase_platform_config *kbase_get_platform_config(void)
+@@ -30,6 +33,25 @@ struct kbase_platform_config *kbase_get_platform_config(void)
+ 	return &dummy_platform_config;
+ }
+ 
++/* MediaTek SoCs have one power domain per shader core */
++static int kbase_platform_dt_init(struct kbase_device *kbdev)
++{
++	struct dev_pm_domain_list *pd_list;
++	int ret;
++
++	if (of_count_phandle_with_args(kbdev->dev->of_node, "power-domains",
++				       "#power-domain-cells") <= 1)
++		return 0;
++
++	ret = devm_pm_domain_attach_list(kbdev->dev, NULL, &pd_list);
++
++	return ret < 0 ? ret : 0;
++}
++
++struct kbase_platform_funcs_conf platform_funcs = {
++	.platform_init_func = kbase_platform_dt_init,
++};
++
+ #ifndef CONFIG_OF
+ int kbase_platform_register(void)
+ {
+diff --git a/product/kernel/drivers/gpu/arm/midgard/platform/devicetree/mali_kbase_config_platform.h b/product/kernel/drivers/gpu/arm/midgard/platform/devicetree/mali_kbase_config_platform.h
+index 584a721..d493b84 100644
+--- a/product/kernel/drivers/gpu/arm/midgard/platform/devicetree/mali_kbase_config_platform.h
++++ b/product/kernel/drivers/gpu/arm/midgard/platform/devicetree/mali_kbase_config_platform.h
+@@ -33,11 +33,12 @@
+  * Attached value: pointer to @ref kbase_platform_funcs_conf
+  * Default value: See @ref kbase_platform_funcs_conf
+  */
+-#define PLATFORM_FUNCS (NULL)
++#define PLATFORM_FUNCS (&platform_funcs)
+ 
+ #define CLK_RATE_TRACE_OPS (&clk_rate_trace_ops)
+ 
+ extern struct kbase_pm_callback_conf pm_callbacks;
++extern struct kbase_platform_funcs_conf platform_funcs;
+ extern struct kbase_clk_rate_trace_op_conf clk_rate_trace_ops;
+ /**
+  * AUTO_SUSPEND_DELAY - Autosuspend delay

@@ -12,6 +12,14 @@ PKG_VERSION="39da994bb6fc8819e5e8c1873907dd21d17e53c1"
 PKG_SHA256="f947b99a1bcb5b86ea270c1ce4cd189f4df26b3c0c8ba92c1ef256bb757afa66"
 PKG_URL="http://github.com/rocknix/mali_kbase/archive/${PKG_VERSION}.tar.gz"
 
+case ${DEVICE} in
+  MT6785)
+    PKG_VERSION="9253151400fda8820ac47da6ee4c31b5a8885e4f"
+    PKG_SHA256="a43c0c92cf65abcac47e3730869cdff2e9dfd3f67134098c784d0bede0047f52"
+    PKG_URL="https://github.com/sydarn/mali_kbase/archive/${PKG_VERSION}.tar.gz"
+    ;;
+esac
+
 make_target() {
   # S922X is an actual Amlogic Meson SoC — it requires the meson platform
   # backend for correct GPU clock and power domain handling.
