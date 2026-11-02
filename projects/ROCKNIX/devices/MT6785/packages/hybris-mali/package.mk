@@ -6,20 +6,24 @@ PKG_VERSION=""
 PKG_LICENSE="Apache-2.0"
 PKG_SITE=""
 PKG_URL=""
-PKG_DEPENDS_TARGET="toolchain libhybris wayland mesa gpudriver"
+PKG_DEPENDS_TARGET="toolchain android-headers libhybris wayland mesa libdrm gpudriver"
 PKG_LONGDESC="gpudriver libmali: the stock Mali blob of the device's own Android system through libhybris"
 PKG_TOOLCHAIN="manual"
 
 make_target() {
   ${CC} ${CFLAGS} -fPIC -shared -fvisibility=hidden -Wl,-soname,libEGL.so.1 \
-    -o libEGL.so.1 egl-wayland-shim.c ${LDFLAGS} -lwayland-client -ldl -lpthread
+    -I${SYSROOT_PREFIX}/usr/include/android \
+    -o libEGL.so.1 egl-wayland-shim.c hybris-gralloc.c \
+    ${LDFLAGS} -lwayland-client -ldl -lpthread
+  ${CC} ${CFLAGS} -fPIC -shared -fvisibility=hidden -Wl,-soname,libgbm.so.1 \
+    -o libgbm.so.1 gbm.c -I${SYSROOT_PREFIX}/usr/include/libdrm ${LDFLAGS} -ldrm
   ${CC} ${CFLAGS} -fPIC -shared -o libhybris-tls-pad.so tls-pad.c ${LDFLAGS}
   ${CC} ${CFLAGS} -o egl-check egl-check.c ${LDFLAGS} -lEGL -lGLESv2
 }
 
 makeinstall_target() {
   mkdir -p ${INSTALL}/usr/lib/hybris-mali
-    cp libEGL.so.1 libhybris-tls-pad.so egl-check android-mount env ${INSTALL}/usr/lib/hybris-mali
+    cp libEGL.so.1 libgbm.so.1 libhybris-tls-pad.so egl-check android-mount env ${INSTALL}/usr/lib/hybris-mali
 
   mkdir -p ${INSTALL}/usr/lib/gpudriver
     cp gpudriver-libmali ${INSTALL}/usr/lib/gpudriver/libmali

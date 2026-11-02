@@ -8,16 +8,16 @@
 H=/usr/lib/hybris-mali
 ACTIVE=/run/hybris-mali/active
 
-# The EGL Wayland shim and libhybris' GLES in place of glvnd's dispatch libraries
+# The EGL shim, its GBM and libhybris' GLES in place of glvnd's and Mesa's libraries
 overrides() {
   echo "${H}/libEGL.so.1 /usr/lib/libEGL.so.1"
+  echo "${H}/libgbm.so.1 /usr/lib/libgbm.so.1"
   echo "/usr/lib/libhybris/libGLESv2.so.2 /usr/lib/libGLESv2.so.2"
   echo "/usr/lib/libhybris/libGLESv1_CM.so.1 /usr/lib/libGLESv1_CM.so.1"
 }
 
 stop() {
   rm -f ${ACTIVE}
-  systemctl unset-environment WLR_RENDERER
   for icd in /usr/share/vulkan/icd.d/panfrost_icd.*.json; do
     umount "${icd}" 2>/dev/null
   done
@@ -38,8 +38,6 @@ start() {
   for icd in /usr/share/vulkan/icd.d/panfrost_icd.*.json; do
     [ -f "${icd}" ] && mount --bind /dev/null "${icd}"
   done
-  # Without a Mesa GPU, sway composites on the CPU
-  systemctl set-environment WLR_RENDERER=pixman
   touch ${ACTIVE}
 }
 

@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
-// libEGL.so.1 shim over libhybris: Wayland window surfaces are pbuffers, and
-// eglSwapBuffers hands each frame to the compositor as a wl_shm buffer, so
-// unmodified Wayland EGL apps run on an Android EGL driver under a plain
-// compositor. With /dev/udmabuf the GPU blits into the shm memory directly;
-// otherwise the frame is read back with glReadPixels.
+// libEGL.so.1 shim over libhybris, so unmodified Wayland EGL apps run on an
+// Android EGL driver under a plain compositor, and wlroots renders on it.
+// Linux dma-bufs, linear or AFBC, become EGLImages through our own gralloc
+// mapper, and the GBM platform is accepted.
+// Wayland window surfaces are pbuffers, and eglSwapBuffers hands each frame
+// to the compositor as a wl_shm buffer, blitted by the GPU into the shm memory
+// through /dev/udmabuf or read back with glReadPixels.
 #define _GNU_SOURCE
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -24,6 +26,7 @@
 #include <unistd.h>
 #include <wayland-client.h>
 #include <wayland-egl-backend.h>
+#include "hybris-gralloc.h"
 
 #define EXPORT __attribute__((visibility("default")))
 #ifndef REAL_EGL
@@ -40,14 +43,12 @@
 	X(EGLint, eglClientWaitSync, (EGLDisplay d, EGLSync s, EGLint f, EGLTime t), (d, s, f, t)) \
 	X(EGLBoolean, eglCopyBuffers, (EGLDisplay d, EGLSurface s, EGLNativePixmapType p), (d, map(s), p)) \
 	X(EGLContext, eglCreateContext, (EGLDisplay d, EGLConfig c, EGLContext s, const EGLint *a), (d, c, s, a)) \
-	X(EGLImage, eglCreateImage, (EGLDisplay d, EGLContext c, EGLenum t, EGLClientBuffer b, const EGLAttrib *a), (d, c, t, b, a)) \
 	X(EGLSurface, eglCreatePbufferFromClientBuffer, (EGLDisplay d, EGLenum t, EGLClientBuffer b, EGLConfig c, const EGLint *a), (d, t, b, c, a)) \
 	X(EGLSurface, eglCreatePbufferSurface, (EGLDisplay d, EGLConfig c, const EGLint *a), (d, c, a)) \
 	X(EGLSurface, eglCreatePixmapSurface, (EGLDisplay d, EGLConfig c, EGLNativePixmapType p, const EGLint *a), (d, c, p, a)) \
 	X(EGLSurface, eglCreatePlatformPixmapSurface, (EGLDisplay d, EGLConfig c, void *p, const EGLAttrib *a), (d, c, p, a)) \
 	X(EGLSync, eglCreateSync, (EGLDisplay d, EGLenum t, const EGLAttrib *a), (d, t, a)) \
 	X(EGLBoolean, eglDestroyContext, (EGLDisplay d, EGLContext c), (d, c)) \
-	X(EGLBoolean, eglDestroyImage, (EGLDisplay d, EGLImage i), (d, i)) \
 	X(EGLBoolean, eglDestroySync, (EGLDisplay d, EGLSync s), (d, s)) \
 	X(EGLBoolean, eglGetConfigs, (EGLDisplay d, EGLConfig *c, EGLint n, EGLint *r), (d, c, n, r)) \
 	X(EGLContext, eglGetCurrentContext, (void), ()) \
@@ -68,7 +69,9 @@
 /* entry points the shim wraps; only the real pointers are generated */
 #define WRAPPED(X) \
 	X(EGLBoolean, eglChooseConfig, (EGLDisplay d, const EGLint *a, EGLConfig *c, EGLint n, EGLint *r)) \
+	X(EGLImage, eglCreateImage, (EGLDisplay d, EGLContext c, EGLenum t, EGLClientBuffer b, const EGLAttrib *a)) \
 	X(EGLSurface, eglCreateWindowSurface, (EGLDisplay d, EGLConfig c, EGLNativeWindowType w, const EGLint *a)) \
+	X(EGLBoolean, eglDestroyImage, (EGLDisplay d, EGLImage i)) \
 	X(EGLBoolean, eglDestroySurface, (EGLDisplay d, EGLSurface s)) \
 	X(EGLBoolean, eglGetConfigAttrib, (EGLDisplay d, EGLConfig c, EGLint a, EGLint *v)) \
 	X(EGLSurface, eglGetCurrentSurface, (EGLint w)) \
@@ -146,19 +149,30 @@ static struct {
 	int udmabuf;		/* /dev/udmabuf fd, -1 if unavailable */
 } wl = { .udmabuf = -1 };
 
+/* EGLImages over hybris-gralloc buffers, which they keep alive */
+struct shim_image {
+	EGLImage img;
+	struct hyb_buffer *buf;
+	struct shim_image *next;
+};
+
 static pthread_once_t once = PTHREAD_ONCE_INIT;
 static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static struct shim_surf *surfaces;
+static struct shim_image *images;
 static __thread EGLint shim_error;
-static int stats, force_readback;
+static int stats, force_readback, gralloc;
 
 static void load(void)
 {
 	const char *path = getenv("HYBRIS_SHIM_REAL_EGL");
 	const char *copy = getenv("HYBRIS_SHIM_COPY");
-	void *h = dlopen(path ? path : REAL_EGL, RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND);
-	void *g = dlopen("libGLESv2.so.2", RTLD_NOW | RTLD_GLOBAL);
+	void *h, *g;
 
+	/* the mapper hook has to be in place before the blob is loaded */
+	gralloc = hyb_gralloc_init() == 0;
+	h = dlopen(path ? path : REAL_EGL, RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND);
+	g = dlopen("libGLESv2.so.2", RTLD_NOW | RTLD_GLOBAL);
 	stats = getenv("HYBRIS_SHIM_STATS") != NULL;
 	force_readback = copy && !strcmp(copy, "readback");
 	if (!h) {
@@ -229,6 +243,160 @@ static EGLSurface map(EGLSurface s)
 	EXPORT ret name params { init(); return real_##name ? real_##name args : (ret)0; }
 PASSTHROUGH(DEF_PT)
 
+/* The blob's own EGL_EXT_image_dma_buf_import does not work, so each dma-buf is wrapped in a
+ * hybris-gralloc buffer and imported as a native buffer */
+
+static EGLImage import_dmabuf(EGLDisplay d, const EGLAttrib *a)
+{
+	EGLAttrib w = 0, h = 0, fourcc = 0, fd = -1, offset = 0, pitch = 0;
+	uint32_t lo = 0, hi = 0;
+	int have_mod = 0, planes = 1;
+	EGLint attr[] = { EGL_IMAGE_PRESERVED_KHR, EGL_TRUE, EGL_NONE };
+	struct hyb_buffer *buf;
+	struct shim_image *si;
+	EGLImage img;
+
+	for (; a && a[0] != EGL_NONE; a += 2) {
+		switch (a[0]) {
+		case EGL_WIDTH: w = a[1]; break;
+		case EGL_HEIGHT: h = a[1]; break;
+		case EGL_LINUX_DRM_FOURCC_EXT: fourcc = a[1]; break;
+		case EGL_DMA_BUF_PLANE0_FD_EXT: fd = a[1]; break;
+		case EGL_DMA_BUF_PLANE0_OFFSET_EXT: offset = a[1]; break;
+		case EGL_DMA_BUF_PLANE0_PITCH_EXT: pitch = a[1]; break;
+		case EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT: lo = a[1]; have_mod = 1; break;
+		case EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT: hi = a[1]; have_mod = 1; break;
+		case EGL_DMA_BUF_PLANE1_FD_EXT:
+		case EGL_DMA_BUF_PLANE2_FD_EXT:
+		case EGL_DMA_BUF_PLANE3_FD_EXT:
+			planes++;
+			break;
+		}
+	}
+	buf = planes == 1 && fd >= 0 ?
+		hyb_buffer_wrap(fcntl(fd, F_DUPFD_CLOEXEC, 0), w, h, fourcc,
+				have_mod ? (uint64_t)hi << 32 | lo : HYB_MOD_INVALID, offset, pitch) : NULL;
+	if (!buf) {
+		shim_error = EGL_BAD_MATCH;
+		return EGL_NO_IMAGE;
+	}
+	img = create_image(d, EGL_NO_CONTEXT, EGL_NATIVE_BUFFER_ANDROID, hyb_buffer_native(buf), attr);
+	si = img != EGL_NO_IMAGE ? malloc(sizeof(*si)) : NULL;
+	if (!si) {
+		if (img != EGL_NO_IMAGE)
+			destroy_image(d, img);
+		hyb_buffer_unref(buf);
+		return EGL_NO_IMAGE;
+	}
+	si->img = img;
+	si->buf = buf;
+	pthread_mutex_lock(&lock);
+	si->next = images;
+	images = si;
+	pthread_mutex_unlock(&lock);
+	return img;
+}
+
+EXPORT EGLImage eglCreateImage(EGLDisplay d, EGLContext c, EGLenum target, EGLClientBuffer b, const EGLAttrib *a)
+{
+	EGLint ia[64];
+	int i = 0;
+
+	init();
+	if (target == EGL_LINUX_DMA_BUF_EXT && gralloc)
+		return import_dmabuf(d, a);
+	if (real_eglCreateImage)
+		return real_eglCreateImage(d, c, target, b, a);
+	for (; a && a[0] != EGL_NONE && i < 62; a += 2) {
+		ia[i++] = a[0];
+		ia[i++] = a[1];
+	}
+	ia[i] = EGL_NONE;
+	return create_image(d, c, target, b, ia);
+}
+
+static EGLImageKHR create_image_khr(EGLDisplay d, EGLContext c, EGLenum target, EGLClientBuffer b, const EGLint *ia)
+{
+	EGLAttrib a[64];
+	int i = 0;
+
+	if (target != EGL_LINUX_DMA_BUF_EXT || !gralloc)
+		return create_image(d, c, target, b, ia);
+	for (; ia && ia[0] != EGL_NONE && i < 62; ia += 2) {
+		a[i++] = ia[0];
+		a[i++] = ia[1];
+	}
+	a[i] = EGL_NONE;
+	return import_dmabuf(d, a);
+}
+
+static EGLBoolean release_image(EGLDisplay d, EGLImage img, EGLBoolean ok)
+{
+	struct shim_image *si = NULL, **pp;
+
+	pthread_mutex_lock(&lock);
+	for (pp = &images; *pp; pp = &(*pp)->next)
+		if ((*pp)->img == img) {
+			si = *pp;
+			*pp = si->next;
+			break;
+		}
+	pthread_mutex_unlock(&lock);
+	if (si) {
+		hyb_buffer_unref(si->buf);
+		free(si);
+	}
+	return ok;
+}
+
+EXPORT EGLBoolean eglDestroyImage(EGLDisplay d, EGLImage img)
+{
+	init();
+	return release_image(d, img, real_eglDestroyImage ? real_eglDestroyImage(d, img) : destroy_image(d, img));
+}
+
+static EGLBoolean destroy_image_khr(EGLDisplay d, EGLImageKHR img)
+{
+	return release_image(d, img, destroy_image(d, img));
+}
+
+static EGLBoolean query_dmabuf_formats(EGLDisplay d, EGLint max, EGLint *formats, EGLint *num)
+{
+	EGLint n = sizeof(hyb_formats) / sizeof(hyb_formats[0]);
+
+	if (max > 0) {
+		n = n < max ? n : max;
+		for (EGLint i = 0; i < n; i++)
+			formats[i] = hyb_formats[i].fourcc;
+	}
+	*num = n;
+	return EGL_TRUE;
+}
+
+static EGLBoolean query_dmabuf_modifiers(EGLDisplay d, EGLint format, EGLint max, EGLuint64KHR *mods,
+					 EGLBoolean *external_only, EGLint *num)
+{
+	static const EGLuint64KHR list[] = { HYB_MOD_LINEAR, HYB_MOD_AFBC, HYB_MOD_AFBC_YTR };
+	const struct hyb_format *f = hyb_format(format);
+	EGLint n;
+
+	if (!f) {
+		shim_error = EGL_BAD_PARAMETER;
+		return EGL_FALSE;
+	}
+	n = 1 + f->afbc;
+	if (max > 0) {
+		n = n < max ? n : max;
+		for (EGLint i = 0; i < n; i++) {
+			mods[i] = list[i];
+			if (external_only)
+				external_only[i] = EGL_FALSE;
+		}
+	}
+	*num = n;
+	return EGL_TRUE;
+}
+
 /* Wayland connection on a private queue, like Mesa's platform_wayland */
 
 static void shm_format(void *d, struct wl_shm *s, uint32_t f)
@@ -282,7 +450,8 @@ static EGLDisplay platform_display(EGLenum platform, void *native)
 	init();
 	if (platform == EGL_PLATFORM_WAYLAND_KHR && native)
 		bind_display(native);
-	else if (platform != EGL_PLATFORM_WAYLAND_KHR && platform != 0x31DD /* SURFACELESS_MESA */) {
+	else if (platform != EGL_PLATFORM_WAYLAND_KHR && platform != 0x31DD /* SURFACELESS_MESA */ &&
+		 !(platform == EGL_PLATFORM_GBM_KHR && gralloc)) {
 		shim_error = EGL_BAD_PARAMETER;
 		return EGL_NO_DISPLAY;
 	}
@@ -299,19 +468,55 @@ static EGLDisplay get_platform_display_ext(EGLenum platform, void *native, const
 	return platform_display(platform, native);
 }
 
+static int has_ext(const char *list, const char *name, size_t len)
+{
+	while (list && *list) {
+		size_t n = strcspn(list, " ");
+
+		if (n == len && !strncmp(list, name, len))
+			return 1;
+		list += n + (list[n] == ' ');
+	}
+	return 0;
+}
+
+/* base plus those of the space-separated extensions it lacks */
+static void add_exts(char *out, size_t size, const char *base, const char *add)
+{
+	size_t n = snprintf(out, size, "%s", base ? base : "");
+
+	while (*add && n < size) {
+		size_t len = strcspn(add, " ");
+
+		if (!has_ext(base, add, len))
+			n += snprintf(out + n, size - n, "%s%.*s", n ? " " : "", (int)len, add);
+		add += len + (add[len] == ' ');
+	}
+}
+
 EXPORT const char *eglQueryString(EGLDisplay d, EGLint name)
 {
-	static char client[1024];
+	static char client[1024], display[4096];
 	const char *s;
 
 	init();
 	s = real_eglQueryString(d, name);
-	if (d != EGL_NO_DISPLAY || name != EGL_EXTENSIONS)
+	if (name != EGL_EXTENSIONS)
 		return s;
+	if (d != EGL_NO_DISPLAY) {
+		if (!gralloc || !s)
+			return s;
+		if (!display[0])
+			add_exts(display, sizeof(display), s,
+				 "EGL_EXT_image_dma_buf_import EGL_EXT_image_dma_buf_import_modifiers");
+		return display;
+	}
 	if (!client[0])
-		snprintf(client, sizeof(client), "%s%sEGL_EXT_platform_base EGL_KHR_platform_wayland "
-			 "EGL_EXT_platform_wayland EGL_MESA_platform_surfaceless",
-			 s ? s : "", s && *s ? " " : "");
+		add_exts(client, sizeof(client), s, gralloc ?
+			 "EGL_EXT_platform_base EGL_KHR_platform_wayland EGL_EXT_platform_wayland "
+			 "EGL_MESA_platform_surfaceless EGL_KHR_platform_gbm EGL_MESA_platform_gbm" :
+			 "EGL_EXT_platform_base EGL_KHR_platform_wayland EGL_EXT_platform_wayland "
+			 "EGL_MESA_platform_surfaceless");
 	return client;
 }
 
@@ -377,7 +582,7 @@ static void free_buffers(struct shim_surf *s)
 			gl.DeleteRenderbuffers(1, &b->rb);
 		}
 		if (b->img)
-			destroy_image(s->dpy, b->img);
+			destroy_image_khr(s->dpy, b->img);
 		if (b->dmafd >= 0)
 			close(b->dmafd);
 		if (b->wl)
@@ -411,7 +616,7 @@ static int import_buffer(struct shim_surf *s, struct shm_buf *b, int memfd)
 		EGL_DMA_BUF_PLANE0_PITCH_EXT, s->w * 4,
 		EGL_NONE
 	};
-	b->img = create_image(s->dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, a);
+	b->img = create_image_khr(s->dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, a);
 	return b->img == EGL_NO_IMAGE_KHR ? -1 : 0;
 }
 
@@ -459,11 +664,8 @@ static void win_destroy(void *priv)
 
 static int can_zero_copy(EGLDisplay d)
 {
-	const char *ext = real_eglQueryString(d, EGL_EXTENSIONS);
-
-	return !force_readback && wl.udmabuf >= 0 && wl.xbgr && create_image && destroy_image &&
-	       gl.EGLImageTargetRenderbufferStorageOES && gl.BlitFramebuffer &&
-	       ext && strstr(ext, "EGL_EXT_image_dma_buf_import");
+	return !force_readback && gralloc && wl.udmabuf >= 0 && wl.xbgr && create_image && destroy_image &&
+	       gl.EGLImageTargetRenderbufferStorageOES && gl.BlitFramebuffer;
 }
 
 static EGLSurface create_window(EGLDisplay d, EGLConfig c, void *native)
@@ -553,7 +755,15 @@ EXPORT EGLBoolean eglDestroySurface(EGLDisplay d, EGLSurface surf)
 
 EXPORT EGLBoolean eglMakeCurrent(EGLDisplay d, EGLSurface w, EGLSurface r, EGLContext c)
 {
+	EGLContext cur;
+
 	init();
+	/* kbase fences no dma-buf, so what a surfaceless context rendered into one (a
+	 * compositor's frame, say) is finished before anyone else can pick it up */
+	cur = real_eglGetCurrentContext();
+	if (cur != EGL_NO_CONTEXT && cur != c && real_eglGetCurrentSurface(EGL_DRAW) == EGL_NO_SURFACE &&
+	    gl.Finish)
+		gl.Finish();
 	return real_eglMakeCurrent(d, map(w), map(r), c);
 }
 
@@ -812,9 +1022,13 @@ EXPORT __eglMustCastToProperFunctionPointerType eglGetProcAddress(const char *na
 		void *fn;
 	} own[] = {
 		{ "eglChooseConfig", eglChooseConfig },
+		{ "eglCreateImage", eglCreateImage },
+		{ "eglCreateImageKHR", create_image_khr },
 		{ "eglCreatePlatformWindowSurface", eglCreatePlatformWindowSurface },
 		{ "eglCreatePlatformWindowSurfaceEXT", create_platform_window_ext },
 		{ "eglCreateWindowSurface", eglCreateWindowSurface },
+		{ "eglDestroyImage", eglDestroyImage },
+		{ "eglDestroyImageKHR", destroy_image_khr },
 		{ "eglDestroySurface", eglDestroySurface },
 		{ "eglGetConfigAttrib", eglGetConfigAttrib },
 		{ "eglGetCurrentSurface", eglGetCurrentSurface },
@@ -823,6 +1037,8 @@ EXPORT __eglMustCastToProperFunctionPointerType eglGetProcAddress(const char *na
 		{ "eglGetPlatformDisplay", eglGetPlatformDisplay },
 		{ "eglGetPlatformDisplayEXT", get_platform_display_ext },
 		{ "eglMakeCurrent", eglMakeCurrent },
+		{ "eglQueryDmaBufFormatsEXT", query_dmabuf_formats },
+		{ "eglQueryDmaBufModifiersEXT", query_dmabuf_modifiers },
 		{ "eglQueryString", eglQueryString },
 		{ "eglQuerySurface", eglQuerySurface },
 		{ "eglSetDamageRegionKHR", set_damage_region },
