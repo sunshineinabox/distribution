@@ -7,9 +7,11 @@
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
 #include <GLES2/gl2ext.h>
+#include <dirent.h>
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <linux/dma-buf.h>
 #include <linux/udmabuf.h>
 #include <poll.h>
@@ -25,6 +27,7 @@
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
+#include <sys/stat.h>
 #include <system/window.h>
 #include <time.h>
 #include <unistd.h>
@@ -60,7 +63,6 @@
 	X(EGLContext, eglGetCurrentContext, (void), ()) \
 	X(EGLDisplay, eglGetCurrentDisplay, (void), ()) \
 	X(EGLBoolean, eglGetSyncAttrib, (EGLDisplay d, EGLSync s, EGLint a, EGLAttrib *v), (d, s, a, v)) \
-	X(EGLBoolean, eglInitialize, (EGLDisplay d, EGLint *ma, EGLint *mi), (d, ma, mi)) \
 	X(EGLenum, eglQueryAPI, (void), ()) \
 	X(EGLBoolean, eglQueryContext, (EGLDisplay d, EGLContext c, EGLint a, EGLint *v), (d, c, a, v)) \
 	X(EGLBoolean, eglReleaseTexImage, (EGLDisplay d, EGLSurface s, EGLint b), (d, map(s), b)) \
@@ -84,6 +86,7 @@
 	X(EGLDisplay, eglGetDisplay, (EGLNativeDisplayType n)) \
 	X(EGLint, eglGetError, (void)) \
 	X(__eglMustCastToProperFunctionPointerType, eglGetProcAddress, (const char *n)) \
+	X(EGLBoolean, eglInitialize, (EGLDisplay d, EGLint *ma, EGLint *mi)) \
 	X(EGLBoolean, eglMakeCurrent, (EGLDisplay d, EGLSurface w, EGLSurface r, EGLContext c)) \
 	X(const char *, eglQueryString, (EGLDisplay d, EGLint n)) \
 	X(EGLBoolean, eglQuerySurface, (EGLDisplay d, EGLSurface s, EGLint a, EGLint *v)) \
@@ -211,6 +214,133 @@ static void *blob_hook(const char *sym, const char *requester)
 	return !strcmp(sym, "prctl") ? (void *)blob_prctl : NULL;
 }
 
+/* EGL_ANDROID_blob_cache shader cache: one file per key hash holding the key size, key and
+ * value, capped at CACHE_MAX */
+#define CACHE_MAX (256LL << 20)
+#define CACHE_ENTRY_MAX (4 << 20)
+
+static char cache_dir[PATH_MAX - 64];
+static pthread_once_t cache_once = PTHREAD_ONCE_INIT;
+static _Atomic long long cache_bytes;
+
+static void cache_init(void)
+{
+	const char *dir = getenv("HYBRIS_SHIM_SHADER_CACHE"), *xdg = getenv("XDG_CACHE_HOME");
+	const char *home = getenv("HOME");
+
+	if (dir && !strcmp(dir, "0"))
+		return;
+	if (dir)
+		snprintf(cache_dir, sizeof(cache_dir), "%s", dir);
+	else if (xdg && *xdg)
+		snprintf(cache_dir, sizeof(cache_dir), "%s/hybris-mali", xdg);
+	else if (home && *home)
+		snprintf(cache_dir, sizeof(cache_dir), "%s/.cache/hybris-mali", home);
+	else
+		return;
+	for (char *p = cache_dir + 1; *p; p++)
+		if (*p == '/') {
+			*p = 0;
+			mkdir(cache_dir, 0755);
+			*p = '/';
+		}
+	if (mkdir(cache_dir, 0755) && errno != EEXIST)
+		cache_dir[0] = 0;
+}
+
+static void cache_count(void)
+{
+	DIR *d = opendir(cache_dir);
+	struct dirent *e;
+	struct stat st;
+
+	while (d && (e = readdir(d)))
+		if (e->d_name[0] != '.' && !fstatat(dirfd(d), e->d_name, &st, 0))
+			cache_bytes += st.st_size;
+	if (d)
+		closedir(d);
+}
+
+static void cache_path(char *path, size_t size, const void *key, EGLsizeiANDROID n)
+{
+	uint64_t h = 0xcbf29ce484222325ULL;	/* FNV-1a */
+
+	for (EGLsizeiANDROID i = 0; i < n; i++)
+		h = (h ^ ((const uint8_t *)key)[i]) * 0x100000001b3ULL;
+	snprintf(path, size, "%s/%016llx", cache_dir, (unsigned long long)h);
+}
+
+static void cache_set(const void *key, EGLsizeiANDROID ksize, const void *value, EGLsizeiANDROID vsize)
+{
+	char path[PATH_MAX], tmp[PATH_MAX + 32];
+	uint32_t n = ksize;
+	int fd, ok;
+
+	pthread_once(&cache_once, cache_count);
+	if (ksize <= 0 || vsize <= 0 || vsize > CACHE_ENTRY_MAX || cache_bytes + 4 + ksize + vsize > CACHE_MAX)
+		return;
+	cache_path(path, sizeof(path), key, ksize);
+	snprintf(tmp, sizeof(tmp), "%s.%d.%d", path, getpid(), gettid());
+	fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0644);
+	if (fd < 0)
+		return;
+	ok = write(fd, &n, 4) == 4 && write(fd, key, ksize) == ksize && write(fd, value, vsize) == vsize;
+	close(fd);
+	if (ok && !rename(tmp, path))
+		cache_bytes += 4 + ksize + vsize;
+	else
+		unlink(tmp);
+}
+
+static EGLsizeiANDROID cache_get(const void *key, EGLsizeiANDROID ksize, void *value, EGLsizeiANDROID vsize)
+{
+	char path[PATH_MAX];
+	EGLsizeiANDROID size = 0;
+	struct stat st;
+	uint32_t n;
+	void *k;
+	int fd;
+
+	if (ksize <= 0)
+		return 0;
+	cache_path(path, sizeof(path), key, ksize);
+	fd = open(path, O_RDONLY | O_CLOEXEC);
+	if (fd < 0)
+		return 0;
+	k = malloc(ksize);
+	if (k && !fstat(fd, &st) && read(fd, &n, 4) == 4 && n == (uint32_t)ksize &&
+	    read(fd, k, ksize) == ksize && !memcmp(k, key, ksize)) {
+		size = st.st_size - 4 - ksize;
+		/* a smaller buffer only asks for the size */
+		if (size <= 0 || (size <= vsize && read(fd, value, size) != size))
+			size = 0;
+	}
+	free(k);
+	close(fd);
+	return size;
+}
+
+/* The extension takes the functions once per display */
+static void set_blob_cache(EGLDisplay d)
+{
+	static EGLDisplay done[4];
+	PFNEGLSETBLOBCACHEFUNCSANDROIDPROC set = NULL;
+	int i;
+
+	if (!cache_dir[0])
+		return;
+	pthread_mutex_lock(&lock);
+	for (i = 0; i < 4 && done[i] && done[i] != d; i++)
+		;
+	if (i < 4 && !done[i])
+		set = (PFNEGLSETBLOBCACHEFUNCSANDROIDPROC)real_eglGetProcAddress("eglSetBlobCacheFuncsANDROID");
+	if (set) {
+		set(d, cache_set, cache_get);
+		done[i] = d;
+	}
+	pthread_mutex_unlock(&lock);
+}
+
 static void load(void)
 {
 	const char *path = getenv("HYBRIS_SHIM_REAL_EGL");
@@ -222,6 +352,7 @@ static void load(void)
 	if (clamp)
 		uclamp_min = atoi(clamp);
 	next_prctl = (__typeof__(next_prctl))dlsym(RTLD_DEFAULT, "_hybris_hook_prctl");
+	cache_init();
 	/* the mapper and prctl hooks have to be in place before the blob is loaded */
 	gralloc = hyb_gralloc_init(blob_hook) == 0;
 	h = dlopen(path ? path : REAL_EGL, RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND);
@@ -550,6 +681,17 @@ EXPORT EGLDisplay eglGetPlatformDisplay(EGLenum platform, void *native, const EG
 static EGLDisplay get_platform_display_ext(EGLenum platform, void *native, const EGLint *a)
 {
 	return platform_display(platform, native);
+}
+
+EXPORT EGLBoolean eglInitialize(EGLDisplay d, EGLint *major, EGLint *minor)
+{
+	EGLBoolean ok;
+
+	init();
+	ok = real_eglInitialize(d, major, minor);
+	if (ok)
+		set_blob_cache(d);
+	return ok;
 }
 
 static int has_ext(const char *list, const char *name, size_t len)
@@ -1577,6 +1719,7 @@ EXPORT __eglMustCastToProperFunctionPointerType eglGetProcAddress(const char *na
 		{ "eglGetError", eglGetError },
 		{ "eglGetPlatformDisplay", eglGetPlatformDisplay },
 		{ "eglGetPlatformDisplayEXT", get_platform_display_ext },
+		{ "eglInitialize", eglInitialize },
 		{ "eglMakeCurrent", eglMakeCurrent },
 		{ "eglQueryDmaBufFormatsEXT", query_dmabuf_formats },
 		{ "eglQueryDmaBufModifiersEXT", query_dmabuf_modifiers },
