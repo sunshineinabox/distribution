@@ -36,6 +36,7 @@
 #define REAL_EGL "/usr/lib/libhybris/libEGL.so.1"
 #endif
 #define NBUF 3
+#define NWIN 4		/* the fourth only once three are queued or on screen */
 #define GL_BGRA_EXT 0x80E1
 #define DRM_FORMAT_XBGR8888 0x34324258	/* 'XB24': R, G, B, X bytes = GL_RGBA order */
 
@@ -148,7 +149,7 @@ struct shim_surf {
 	/* native window: the blob dequeues nbuf and queues them back */
 	int native;
 	struct ANativeWindow anw;
-	struct win_buf nbuf[NBUF];
+	struct win_buf nbuf[NWIN];
 	uint32_t fourcc;
 	uint64_t frame_id;
 	pthread_mutex_t mutex;
@@ -804,7 +805,7 @@ static int win_dequeue(struct ANativeWindow *w, struct ANativeWindowBuffer **out
 		s->h = s->win->height;
 	}
 	while (!b) {
-		for (int i = 0; i < NBUF && !b; i++)
+		for (int i = 0; i < NWIN && !b; i++)
 			if (!s->nbuf[i].busy && !s->nbuf[i].dequeued)
 				b = &s->nbuf[i];
 		if (!b && wl_display_dispatch_queue(wl.wl, wl.queue) < 0)
@@ -827,7 +828,7 @@ static int win_dequeue(struct ANativeWindow *w, struct ANativeWindowBuffer **out
 
 static struct win_buf *find_buffer(struct shim_surf *s, struct ANativeWindowBuffer *buffer)
 {
-	for (int i = 0; i < NBUF; i++)
+	for (int i = 0; i < NWIN; i++)
 		if (s->nbuf[i].buf && hyb_buffer_native(s->nbuf[i].buf) == buffer)
 			return &s->nbuf[i];
 	return NULL;
@@ -984,7 +985,7 @@ static int win_query(const struct ANativeWindow *w, int what, int *value)
 		*value = s->win != NULL;
 		break;
 	case NATIVE_WINDOW_MAX_BUFFER_COUNT:
-		*value = NBUF;
+		*value = NWIN;
 		break;
 	case NATIVE_WINDOW_TRANSFORM_HINT:
 	case NATIVE_WINDOW_CONSUMER_RUNNING_BEHIND:
@@ -1191,7 +1192,7 @@ EXPORT EGLSurface eglCreatePlatformWindowSurface(EGLDisplay d, EGLConfig c, void
 
 static void free_surface(struct shim_surf *s)
 {
-	for (int i = 0; i < NBUF; i++)
+	for (int i = 0; i < NWIN; i++)
 		drop_buffer(&s->nbuf[i]);
 	if (s->native)
 		pthread_mutex_destroy(&s->mutex);
