@@ -8,10 +8,11 @@
 H=/usr/lib/hybris-mali
 ACTIVE=/run/hybris-mali/active
 
-# The EGL shim, its GBM and libhybris' GLES in place of glvnd's and Mesa's libraries
+# shims and libhybris' GLES bind-mounted over the system libraries
 overrides() {
   echo "${H}/libEGL.so.1 /usr/lib/libEGL.so.1"
   echo "${H}/libgbm.so.1 /usr/lib/libgbm.so.1"
+  echo "${H}/libvulkan.so.1 /usr/lib/libvulkan.so.1"
   echo "/usr/lib/libhybris/libGLESv2.so.2 /usr/lib/libGLESv2.so.2"
   echo "/usr/lib/libhybris/libGLESv1_CM.so.1 /usr/lib/libGLESv1_CM.so.1"
 }

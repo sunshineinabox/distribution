@@ -364,10 +364,19 @@ static int blob_prctl(int option, unsigned long a2, unsigned long a3, unsigned l
 	return next_prctl ? next_prctl(option, a2, a3, a4, a5) : prctl(option, a2, a3, a4, a5);
 }
 
+/* Without a service manager an AIDL lookup waits forever. Reporting none declared makes
+ * libui take the hooked IMapper@4.0 */
+static int no_aidl_service(const char *instance)
+{
+	return 0;
+}
+
 static void *hook(const char *sym, const char *requester)
 {
 	if (!strcmp(sym, "prctl"))
 		return blob_prctl;
+	if (!strcmp(sym, "AServiceManager_isDeclared"))
+		return no_aidl_service;
 	if (strstr(sym, "mapper4V4_07IMapper10getService")) {
 		if (debug)
 			fprintf(stderr, "hybris-gralloc: %s for %s\n", sym, requester);
