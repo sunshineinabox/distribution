@@ -182,12 +182,13 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static struct shim_surf *surfaces, *zombies;
 static struct shim_image *images;
 static __thread EGLint shim_error;
-static int stats, force_readback, gralloc;
+static int stats, force_readback, gralloc, sync_files;
 
 static void load(void)
 {
 	const char *path = getenv("HYBRIS_SHIM_REAL_EGL");
 	const char *copy = getenv("HYBRIS_SHIM_COPY");
+	const char *sync = getenv("WLR_GLES2_SYNC_FILES");
 	void *h, *g;
 
 	/* the mapper hook has to be in place before the blob is loaded */
@@ -196,6 +197,8 @@ static void load(void)
 	g = dlopen("libGLESv2.so.2", RTLD_NOW | RTLD_GLOBAL);
 	stats = getenv("HYBRIS_SHIM_STATS") != NULL;
 	force_readback = copy && !strcmp(copy, "readback");
+	/* the compositor waits for and fences dma-bufs through sync files (wlroots 0010) */
+	sync_files = sync && !strcmp(sync, "1");
 	if (!h) {
 		fprintf(stderr, "egl-wayland-shim: %s\n", dlerror());
 		return;
@@ -772,6 +775,23 @@ static int alloc_buffer(struct shim_surf *s, struct win_buf *b)
 	return 0;
 }
 
+/* Whatever still reads or writes a buffer (the compositor, mostly), for the blob
+ * to wait on before rendering there again; -1 once it is idle */
+static int release_fence(struct hyb_buffer *buf)
+{
+	struct dma_buf_export_sync_file arg = { .flags = DMA_BUF_SYNC_WRITE, .fd = -1 };
+	struct pollfd p = { .events = POLLIN };
+
+	if (!sync_files || ioctl(hyb_buffer_fd(buf), DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &arg))
+		return -1;
+	p.fd = arg.fd;
+	if (poll(&p, 1, 0) == 1) {
+		close(arg.fd);
+		return -1;
+	}
+	return arg.fd;
+}
+
 static int win_dequeue(struct ANativeWindow *w, struct ANativeWindowBuffer **out, int *fence)
 {
 	struct shim_surf *s = SURF_OF(w);
@@ -799,7 +819,7 @@ static int win_dequeue(struct ANativeWindow *w, struct ANativeWindowBuffer **out
 	else {
 		b->dequeued = 1;
 		*out = hyb_buffer_native(b->buf);
-		*fence = -1;
+		*fence = release_fence(b->buf);
 	}
 	pthread_mutex_unlock(&s->mutex);
 	return ret;
@@ -824,20 +844,35 @@ static void wait_fence(int fence)
 	close(fence);
 }
 
+/* kbase fences no dma-buf: the blob's fence goes on the buffer for the compositor
+ * and the display to wait on, or the frame is finished here */
+static void fence_buffer(struct hyb_buffer *buf, int fence)
+{
+	struct dma_buf_import_sync_file arg = { .flags = DMA_BUF_SYNC_WRITE, .fd = fence };
+
+	if (fence < 0)
+		return;
+	if (sync_files && !ioctl(hyb_buffer_fd(buf), DMA_BUF_IOCTL_IMPORT_SYNC_FILE, &arg))
+		close(fence);
+	else
+		wait_fence(fence);
+}
+
 static int win_queue(struct ANativeWindow *w, struct ANativeWindowBuffer *buffer, int fence)
 {
 	struct shim_surf *s = SURF_OF(w);
 	double t0 = now_ms();
 	struct win_buf *b;
 
-	/* kbase fences no dma-buf: the compositor must get the frame finished */
-	wait_fence(fence);
 	pthread_mutex_lock(&s->mutex);
 	b = find_buffer(s, buffer);
 	if (!b) {
 		pthread_mutex_unlock(&s->mutex);
+		if (fence >= 0)
+			close(fence);
 		return -EINVAL;
 	}
+	fence_buffer(b->buf, fence);
 	b->dequeued = 0;
 	s->frame_id++;
 	if (stats) {
@@ -1230,11 +1265,11 @@ EXPORT EGLBoolean eglMakeCurrent(EGLDisplay d, EGLSurface w, EGLSurface r, EGLCo
 	EGLBoolean ok;
 
 	init();
-	/* kbase fences no dma-buf, so what a surfaceless context rendered into one (a
-	 * compositor's frame, say) is finished before anyone else can pick it up */
+	/* kbase fences no dma-buf, so unless the compositor fences them itself, what a
+	 * surfaceless context rendered is finished before anyone else picks it up */
 	cur = real_eglGetCurrentContext();
-	if (cur != EGL_NO_CONTEXT && cur != c && real_eglGetCurrentSurface(EGL_DRAW) == EGL_NO_SURFACE &&
-	    gl.Finish)
+	if (!sync_files && cur != EGL_NO_CONTEXT && cur != c &&
+	    real_eglGetCurrentSurface(EGL_DRAW) == EGL_NO_SURFACE && gl.Finish)
 		gl.Finish();
 	ok = real_eglMakeCurrent(d, map(w), map(r), c);
 	if (zombies)
