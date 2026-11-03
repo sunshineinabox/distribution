@@ -1,0 +1,90 @@
+From 1aa4c0336cbcf7c82bb34ec641246664a0db67c9 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Mon, 2 Nov 2026 23:37:25 -0800
+Subject: [PATCH] panvk/jm: wait for a pending SIMULTANEOUS_USE command buffer
+ before re-issuing it
+
+Re-issuing a SIMULTANEOUS_USE command buffer rewrites job and tiler
+descriptors that its previous submission may still be using. Wait for that
+submission's fence first.
+---
+ src/panfrost/vulkan/jm/panvk_cmd_buffer.h    |  4 ++++
+ src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c |  3 +++
+ src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c  | 18 ++++++++++++++++++
+ 3 files changed, 25 insertions(+)
+
+diff --git a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+index eef218c..c13b85b 100644
+--- a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
++++ b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+@@ -75,6 +75,10 @@ struct panvk_cmd_event_op {
+ 
+ struct panvk_cmd_buffer {
+    struct vk_command_buffer vk;
++   VkCommandBufferUsageFlags flags;
++
++   /* Syncobj of the last submission of a SIMULTANEOUS_USE command buffer */
++   uint32_t last_submit;
+ 
+    struct panvk_pool desc_pool;
+    struct panvk_pool varying_pool;
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+index 09cbf4a..04c2034 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -445,6 +445,8 @@ panvk_destroy_cmdbuf(struct vk_command_buffer *vk_cmdbuf)
+    panvk_pool_cleanup(&cmdbuf->tls_pool);
+    panvk_pool_cleanup(&cmdbuf->varying_pool);
+    panvk_cmd_buffer_obj_list_cleanup(cmdbuf, push_sets);
++   if (cmdbuf->last_submit)
++      pan_kmod_sync_destroy(dev->kmod.dev, cmdbuf->last_submit);
+    vk_command_buffer_finish(&cmdbuf->vk);
+    vk_free(&dev->vk.alloc, cmdbuf);
+ }
+@@ -536,6 +538,7 @@ panvk_per_arch(BeginCommandBuffer)(VkCommandBuffer commandBuffer,
+    VK_FROM_HANDLE(panvk_cmd_buffer, cmdbuf, commandBuffer);
+ 
+    vk_command_buffer_begin(&cmdbuf->vk, pBeginInfo);
++   cmdbuf->flags = pBeginInfo->flags;
+ 
+    return VK_SUCCESS;
+ }
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+index cd203fa..31a921d 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+@@ -251,6 +251,16 @@ panvk_per_arch(gpu_queue_submit)(struct vk_queue *vk_queue, struct vk_queue_subm
+    for (uint32_t j = 0; j < submit->command_buffer_count; ++j) {
+       struct panvk_cmd_buffer *cmdbuf =
+          container_of(submit->command_buffers[j], struct panvk_cmd_buffer, vk);
++      const bool simultaneous =
++         cmdbuf->flags & VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
++
++      /* Re-issuing rewrites descriptors a pending submission may still use */
++      if (simultaneous && cmdbuf->last_submit) {
++         ASSERTED int ret = pan_kmod_sync_wait(dev->kmod.dev,
++                                               &cmdbuf->last_submit, 1,
++                                               INT64_MAX, 0, NULL);
++         assert(!ret);
++      }
+ 
+       list_for_each_entry(struct panvk_batch, batch, &cmdbuf->batches, node) {
+          /* FIXME: should be done at the batch level */
+@@ -311,6 +321,14 @@ panvk_per_arch(gpu_queue_submit)(struct vk_queue *vk_queue, struct vk_queue_subm
+ 
+          panvk_signal_event_syncobjs(queue, batch);
+       }
++
++      if (simultaneous) {
++         if (!cmdbuf->last_submit &&
++             pan_kmod_sync_create(dev->kmod.dev, 0, &cmdbuf->last_submit))
++            return panvk_error(dev, VK_ERROR_OUT_OF_HOST_MEMORY);
++
++         panvk_queue_transfer_sync(queue, cmdbuf->last_submit);
++      }
+    }
+ 
+    /* Transfer the out fence to signal semaphores */
+-- 
+2.56.0
+
