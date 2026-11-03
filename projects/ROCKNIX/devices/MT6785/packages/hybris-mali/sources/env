@@ -12,3 +12,5 @@ export HYBRIS_PATCH_TLS="libc.so"
 export HYBRIS_USE_VENDOR_NAMESPACE="1"
 export LIBEGL="/vendor/lib64/egl/libGLES_mali.so"
 export LIBGLESV2="/vendor/lib64/egl/libGLES_mali.so"
+# wlroots: the blob writes AFBC in RGB order only
+export WLR_OUTPUT_RGB_ORDER_TWIN="1"
