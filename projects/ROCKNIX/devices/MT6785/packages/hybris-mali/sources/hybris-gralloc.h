@@ -18,6 +18,7 @@
 #define HYB_XRGB8888 HYB_FOURCC('X', 'R', '2', '4')
 #define HYB_ARGB8888 HYB_FOURCC('A', 'R', '2', '4')
 #define HYB_RGB565 HYB_FOURCC('R', 'G', '1', '6')
+#define HYB_BGR888 HYB_FOURCC('B', 'G', '2', '4')
 
 #define HYB_MOD_LINEAR 0ULL
 #define HYB_MOD_INVALID 0x00ffffffffffffffULL
@@ -45,6 +46,7 @@ static const struct hyb_format hyb_formats[] = {
 	{ HYB_XRGB8888, HYB_ARGB8888, 5, 4, 0 },	/* BGRA_8888 */
 	{ HYB_ARGB8888, HYB_ARGB8888, 5, 4, 0 },
 	{ HYB_RGB565, HYB_RGB565, 4, 2, 0 },		/* RGB_565 */
+	{ HYB_BGR888, HYB_BGR888, 3, 3, 2 },		/* RGB_888 */
 };
 
 static inline const struct hyb_format *hyb_format(uint32_t fourcc)
@@ -113,7 +115,10 @@ static inline size_t hyb_layout(int w, int h, const struct hyb_format *f, uint64
 		size = (blocks * 16 + HYB_AFBC_BODY_ALIGN - 1) / HYB_AFBC_BODY_ALIGN * HYB_AFBC_BODY_ALIGN +
 		       blocks * HYB_AFBC_W * HYB_AFBC_H * f->cpp;
 	} else {
-		*pitch = (w * f->cpp + 63) & ~63;
+		/* 64-byte rows of whole pixels */
+		uint32_t align = f->cpp % 2 ? 64 * f->cpp : 64;
+
+		*pitch = (w * f->cpp + align - 1) / align * align;
 		size = (size_t)*pitch * h;
 	}
 	return (size + 4095) & ~(size_t)4095;
