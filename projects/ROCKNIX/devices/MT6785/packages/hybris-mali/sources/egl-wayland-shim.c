@@ -14,26 +14,20 @@
 #include <limits.h>
 #include <linux/dma-buf.h>
 #include <linux/udmabuf.h>
-#include <poll.h>
 #include <pthread.h>
-#include <sched.h>
-#include <stdarg.h>
-#include <stdbool.h>
-#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
-#include <sys/prctl.h>
 #include <sys/stat.h>
-#include <system/window.h>
 #include <time.h>
 #include <unistd.h>
 #include <wayland-client.h>
 #include <wayland-egl-backend.h>
 #include "hybris-gralloc.h"
+#include "hybris-window.h"
 #include "linux-dmabuf-v1-client-protocol.h"
 
 #define EXPORT __attribute__((visibility("default")))
@@ -41,7 +35,6 @@
 #define REAL_EGL "/usr/lib/libhybris/libEGL.so.1"
 #endif
 #define NBUF 3
-#define NWIN 4		/* the fourth only once three are queued or on screen */
 #define GL_BGRA_EXT 0x80E1
 #define DRM_FORMAT_XBGR8888 0x34324258	/* 'XB24': R, G, B, X bytes = GL_RGBA order */
 
@@ -134,36 +127,21 @@ struct shm_buf {
 	GLuint rb, fb;
 };
 
-struct win_buf {
-	struct hyb_buffer *buf;
-	struct wl_buffer *wl;
-	int w, h, busy, dequeued;
-};
-
 struct shim_surf {
 	EGLDisplay dpy;
 	EGLConfig cfg;
 	EGLSurface real;
 	struct wl_egl_window *win;
+	struct hyb_window *native;	/* the blob's own window surface over it */
+	/* or a pbuffer, presented through wl_shm */
 	struct wl_event_queue *queue;	/* the surface's own, like Mesa's */
 	struct wl_surface *surf;	/* wrappers on queue */
 	struct wl_shm *shm;
-	struct zwp_linux_dmabuf_v1 *dmabuf;
 	int w, h, interval, transform_set, zero_copy;
 	struct shm_buf buf[NBUF];
 	struct wl_callback *frame;
 	double cost;
 	int frames;
-	/* native window: the blob dequeues nbuf and queues them back */
-	int native;
-	struct ANativeWindow anw;
-	struct win_buf nbuf[NWIN];
-	uint32_t fourcc;
-	uint64_t frame_id;
-	pthread_mutex_t mutex;
-	/* the blob's references to anw: freed once destroyed and unreferenced, whichever
-	 * thread had it current (under lock) */
-	int refs, dead;
 	struct shim_surf *next;
 };
 
@@ -176,10 +154,7 @@ static struct {
 	int xbgr;
 	int udmabuf;		/* /dev/udmabuf fd, -1 if unavailable */
 	struct zwp_linux_dmabuf_v1 *dmabuf;
-	struct {		/* what the compositor imports, per hyb_formats entry */
-		int supported, n;
-		uint64_t mods[8];
-	} fmt[sizeof(hyb_formats) / sizeof(hyb_formats[0])];
+	struct hyb_wl_format fmt[HYB_NFORMATS];
 } wl = { .udmabuf = -1 };
 
 /* EGLImages over hybris-gralloc buffers, which they keep alive */
@@ -196,30 +171,6 @@ static _Atomic int live_surfaces;
 static struct shim_image *images;
 static __thread EGLint shim_error;
 static int stats, force_readback, gralloc, sync_files, compositor_fences;
-
-/* The blob names its threads with prctl. Its mali- ones (mali-cmar-backend submits all the
- * GPU work) are too light for the scheduler to move off the little cores, so they get a
- * utilization floor, as Android's top-app boost gives them */
-static int (*next_prctl)(int option, unsigned long a2, unsigned long a3, unsigned long a4, unsigned long a5);
-static unsigned int uclamp_min = 512;
-
-static int blob_prctl(int option, unsigned long a2, unsigned long a3, unsigned long a4, unsigned long a5)
-{
-	struct sched_attr attr = {
-		.size = sizeof(attr),
-		.sched_flags = SCHED_FLAG_KEEP_ALL | SCHED_FLAG_UTIL_CLAMP_MIN,
-		.sched_util_min = uclamp_min,
-	};
-
-	if (option == PR_SET_NAME && a2 && uclamp_min && !strncmp((const char *)a2, "mali-", 5))
-		sched_setattr(0, &attr, 0);
-	return next_prctl ? next_prctl(option, a2, a3, a4, a5) : prctl(option, a2, a3, a4, a5);
-}
-
-static void *blob_hook(const char *sym, const char *requester)
-{
-	return !strcmp(sym, "prctl") ? (void *)blob_prctl : NULL;
-}
 
 /* EGL_ANDROID_blob_cache shader cache: one file per key hash holding the key size, key and
  * value, capped at CACHE_MAX */
@@ -353,15 +304,11 @@ static void load(void)
 	const char *path = getenv("HYBRIS_SHIM_REAL_EGL");
 	const char *copy = getenv("HYBRIS_SHIM_COPY");
 	const char *sync = getenv("WLR_GLES2_SYNC_FILES");
-	const char *clamp = getenv("HYBRIS_SHIM_UCLAMP_MIN");
 	void *h, *g;
 
-	if (clamp)
-		uclamp_min = atoi(clamp);
-	next_prctl = (__typeof__(next_prctl))dlsym(RTLD_DEFAULT, "_hybris_hook_prctl");
 	cache_init();
-	/* the mapper and prctl hooks have to be in place before the blob is loaded */
-	gralloc = hyb_gralloc_init(blob_hook) == 0;
+	/* the mapper and thread hooks have to be in place before the blob is loaded */
+	gralloc = hyb_gralloc_init() == 0;
 	h = dlopen(path ? path : REAL_EGL, RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND);
 	g = dlopen("libGLESv2.so.2", RTLD_NOW | RTLD_GLOBAL);
 	stats = getenv("HYBRIS_SHIM_STATS") != NULL;
@@ -599,25 +546,6 @@ static void shm_format(void *d, struct wl_shm *s, uint32_t f)
 }
 static const struct wl_shm_listener shm_listener = { shm_format };
 
-static void dmabuf_format(void *d, struct zwp_linux_dmabuf_v1 *z, uint32_t format)
-{
-	const struct hyb_format *f = hyb_format(format);
-
-	if (f)
-		wl.fmt[f - hyb_formats].supported = 1;
-}
-
-static void dmabuf_modifier(void *d, struct zwp_linux_dmabuf_v1 *z, uint32_t format, uint32_t hi, uint32_t lo)
-{
-	const struct hyb_format *f = hyb_format(format);
-
-	if (f && wl.fmt[f - hyb_formats].n < 8) {
-		wl.fmt[f - hyb_formats].supported = 1;
-		wl.fmt[f - hyb_formats].mods[wl.fmt[f - hyb_formats].n++] = (uint64_t)hi << 32 | lo;
-	}
-}
-static const struct zwp_linux_dmabuf_v1_listener dmabuf_listener = { dmabuf_format, dmabuf_modifier };
-
 static void reg_global(void *d, struct wl_registry *r, uint32_t name, const char *iface, uint32_t ver)
 {
 	if (!strcmp(iface, wl_shm_interface.name) && !wl.shm) {
@@ -626,7 +554,7 @@ static void reg_global(void *d, struct wl_registry *r, uint32_t name, const char
 	} else if (!strcmp(iface, zwp_linux_dmabuf_v1_interface.name) && !wl.dmabuf && ver >= 3 && gralloc) {
 		/* version 3 lists the modifiers itself */
 		wl.dmabuf = wl_registry_bind(r, name, &zwp_linux_dmabuf_v1_interface, 3);
-		zwp_linux_dmabuf_v1_add_listener(wl.dmabuf, &dmabuf_listener, NULL);
+		hyb_window_listen_dmabuf(wl.dmabuf, wl.fmt);
 	}
 }
 
@@ -932,8 +860,12 @@ static void win_resize(struct wl_egl_window *w, void *priv) {}
 static void win_destroy(void *priv)
 {
 	struct shim_surf *s = priv;
-	if (s)
-		s->win = NULL;
+
+	if (!s)
+		return;
+	s->win = NULL;
+	if (s->native)
+		hyb_window_detach(s->native);
 }
 
 static int can_zero_copy(EGLDisplay d)
@@ -941,13 +873,6 @@ static int can_zero_copy(EGLDisplay d)
 	return !force_readback && gralloc && wl.udmabuf >= 0 && wl.xbgr && create_image && destroy_image &&
 	       gl.EGLImageTargetRenderbufferStorageOES && gl.BlitFramebuffer;
 }
-
-/* Native windows: the blob dequeues our gralloc buffers through an ANativeWindow,
- * renders into them, linear or AFBC, and queues them back, and each goes to the
- * compositor as a linux-dmabuf buffer: no copy, and scanout-ready */
-
-#define SURF_OF(w) ((struct shim_surf *)((char *)(w) - offsetof(struct shim_surf, anw)))
-#define CONSUMER_USAGE 0x900	/* GPU texture + composer */
 
 static const struct wl_callback_listener frame_listener;
 
@@ -965,407 +890,27 @@ static void attach(struct shim_surf *s, struct wl_buffer *b)
 	s->win->dy = 0;
 }
 
-static uint32_t hal_fourcc(int hal)
-{
-	for (size_t i = 0; i < sizeof(hyb_formats) / sizeof(hyb_formats[0]); i++)
-		if (hyb_formats[i].hal == hal && wl.fmt[i].supported)
-			return hyb_formats[i].fourcc;
-	return 0;
-}
-
-static void nbuf_release(void *data, struct wl_buffer *wb)
-{
-	((struct win_buf *)data)->busy = 0;
-}
-static const struct wl_buffer_listener nbuf_listener = { nbuf_release };
-
-static void drop_buffer(struct win_buf *b)
-{
-	if (b->wl)
-		wl_buffer_destroy(b->wl);
-	hyb_buffer_unref(b->buf);
-	memset(b, 0, sizeof(*b));
-}
-
-static int alloc_buffer(struct shim_surf *s, struct win_buf *b)
-{
-	const struct hyb_format *f = hyb_format(s->fourcc);
-	size_t i = f - hyb_formats;
-	uint64_t mod = hyb_pick_modifier(f, s->w, s->h, wl.fmt[i].mods, wl.fmt[i].n);
-	struct zwp_linux_buffer_params_v1 *p;
-
-	if (mod == HYB_MOD_INVALID || !(b->buf = hyb_buffer_alloc(s->w, s->h, s->fourcc, mod)))
-		return -1;
-	p = zwp_linux_dmabuf_v1_create_params(s->dmabuf);
-	zwp_linux_buffer_params_v1_add(p, hyb_buffer_fd(b->buf), 0, 0, hyb_buffer_pitch(b->buf), mod >> 32, mod);
-	b->wl = zwp_linux_buffer_params_v1_create_immed(p, s->w, s->h, s->fourcc, 0);
-	zwp_linux_buffer_params_v1_destroy(p);
-	wl_buffer_add_listener(b->wl, &nbuf_listener, b);
-	b->w = s->w;
-	b->h = s->h;
-	if (stats)
-		fprintf(stderr, "egl-wayland-shim: %dx%d %.4s buffer, modifier %#llx\n", b->w, b->h,
-			(const char *)&s->fourcc, (unsigned long long)mod);
-	return 0;
-}
-
-/* Whatever still reads or writes a buffer (the compositor, mostly), for the blob
- * to wait on before rendering there again; -1 once it is idle */
-static int release_fence(struct hyb_buffer *buf)
-{
-	struct dma_buf_export_sync_file arg = { .flags = DMA_BUF_SYNC_WRITE, .fd = -1 };
-	struct pollfd p = { .events = POLLIN };
-
-	if (!sync_files || ioctl(hyb_buffer_fd(buf), DMA_BUF_IOCTL_EXPORT_SYNC_FILE, &arg))
-		return -1;
-	p.fd = arg.fd;
-	if (poll(&p, 1, 0) == 1) {
-		close(arg.fd);
-		return -1;
-	}
-	return arg.fd;
-}
-
-static int win_dequeue(struct ANativeWindow *w, struct ANativeWindowBuffer **out, int *fence)
-{
-	struct shim_surf *s = SURF_OF(w);
-	struct win_buf *b = NULL;
-	int ret = 0;
-
-	pthread_mutex_lock(&s->mutex);
-	if (s->win && s->win->width > 0 && s->win->height > 0) {
-		s->w = s->win->width;
-		s->h = s->win->height;
-	}
-	while (!b) {
-		for (int i = 0; i < NWIN && !b; i++)
-			if (!s->nbuf[i].busy && !s->nbuf[i].dequeued)
-				b = &s->nbuf[i];
-		if (!b && wl_display_dispatch_queue(wl.wl, s->queue) < 0)
-			break;
-	}
-	if (b && b->buf && (b->w != s->w || b->h != s->h || hyb_buffer_format(b->buf) != s->fourcc))
-		drop_buffer(b);
-	if (!b)
-		ret = -EIO;
-	else if (!b->buf && alloc_buffer(s, b) < 0)
-		ret = -ENOMEM;
-	else {
-		b->dequeued = 1;
-		*out = hyb_buffer_native(b->buf);
-		*fence = release_fence(b->buf);
-	}
-	pthread_mutex_unlock(&s->mutex);
-	return ret;
-}
-
-static struct win_buf *find_buffer(struct shim_surf *s, struct ANativeWindowBuffer *buffer)
-{
-	for (int i = 0; i < NWIN; i++)
-		if (s->nbuf[i].buf && hyb_buffer_native(s->nbuf[i].buf) == buffer)
-			return &s->nbuf[i];
-	return NULL;
-}
-
-static void wait_fence(int fence)
-{
-	struct pollfd p = { .fd = fence, .events = POLLIN };
-
-	if (fence < 0)
-		return;
-	while (poll(&p, 1, -1) < 0 && errno == EINTR)
-		;
-	close(fence);
-}
-
-/* kbase fences no dma-buf: the blob's fence goes on the buffer for the compositor
- * and the display to wait on, or the frame is finished here */
-static void fence_buffer(struct hyb_buffer *buf, int fence)
-{
-	struct dma_buf_import_sync_file arg = { .flags = DMA_BUF_SYNC_WRITE, .fd = fence };
-
-	if (fence < 0)
-		return;
-	if (sync_files && !ioctl(hyb_buffer_fd(buf), DMA_BUF_IOCTL_IMPORT_SYNC_FILE, &arg))
-		close(fence);
-	else
-		wait_fence(fence);
-}
-
-static int win_queue(struct ANativeWindow *w, struct ANativeWindowBuffer *buffer, int fence)
-{
-	struct shim_surf *s = SURF_OF(w);
-	double t0 = now_ms();
-	struct win_buf *b;
-
-	pthread_mutex_lock(&s->mutex);
-	b = find_buffer(s, buffer);
-	if (!b) {
-		pthread_mutex_unlock(&s->mutex);
-		if (fence >= 0)
-			close(fence);
-		return -EINVAL;
-	}
-	fence_buffer(b->buf, fence);
-	b->dequeued = 0;
-	s->frame_id++;
-	if (stats) {
-		s->cost += now_ms() - t0;
-		if (++s->frames == 120) {
-			fprintf(stderr, "egl-wayland-shim: %.2f ms per frame waiting for the GPU\n", s->cost / s->frames);
-			s->cost = 0;
-			s->frames = 0;
-		}
-	}
-	if (s->win) {
-		while (s->frame && s->interval > 0)
-			if (wl_display_dispatch_queue(wl.wl, s->queue) < 0)
-				break;
-		if (s->interval > 0) {
-			s->frame = wl_surface_frame(s->surf);
-			wl_callback_add_listener(s->frame, &frame_listener, s);
-		}
-		b->busy = 1;
-		attach(s, b->wl);
-		s->win->attached_width = b->w;
-		s->win->attached_height = b->h;
-		if (wl_proxy_get_version((struct wl_proxy *)s->surf) >= 4)
-			wl_surface_damage_buffer(s->surf, 0, 0, INT32_MAX, INT32_MAX);
-		else
-			wl_surface_damage(s->surf, 0, 0, INT32_MAX, INT32_MAX);
-		wl_surface_commit(s->surf);
-		wl_display_flush(wl.wl);
-	}
-	pthread_mutex_unlock(&s->mutex);
-	return 0;
-}
-
-static int win_cancel(struct ANativeWindow *w, struct ANativeWindowBuffer *buffer, int fence)
-{
-	struct shim_surf *s = SURF_OF(w);
-	struct win_buf *b;
-
-	pthread_mutex_lock(&s->mutex);
-	b = find_buffer(s, buffer);
-	if (b) {
-		fence_buffer(b->buf, fence);	/* what the blob did there so far */
-		b->dequeued = 0;
-	} else if (fence >= 0) {
-		close(fence);
-	}
-	pthread_mutex_unlock(&s->mutex);
-	return 0;
-}
-
-static int win_dequeue_old(struct ANativeWindow *w, struct ANativeWindowBuffer **out)
-{
-	int fence, ret = win_dequeue(w, out, &fence);
-
-	if (!ret)
-		wait_fence(fence);
-	return ret;
-}
-
-static int win_lock_old(struct ANativeWindow *w, struct ANativeWindowBuffer *buffer)
-{
-	return 0;
-}
-
-static int win_queue_old(struct ANativeWindow *w, struct ANativeWindowBuffer *buffer)
-{
-	return win_queue(w, buffer, -1);
-}
-
-static int win_cancel_old(struct ANativeWindow *w, struct ANativeWindowBuffer *buffer)
-{
-	return win_cancel(w, buffer, -1);
-}
-
-static int win_interval(struct ANativeWindow *w, int interval)
-{
-	SURF_OF(w)->interval = interval > 0 ? interval : 0;
-	return 0;
-}
-
-static int win_query(const struct ANativeWindow *w, int what, int *value)
-{
-	struct shim_surf *s = SURF_OF(w);
-	const struct hyb_format *f = hyb_format(s->fourcc);
-
-	switch (what) {
-	case NATIVE_WINDOW_WIDTH:
-	case NATIVE_WINDOW_DEFAULT_WIDTH:
-		*value = s->win && s->win->width > 0 ? s->win->width : s->w;
-		break;
-	case NATIVE_WINDOW_HEIGHT:
-	case NATIVE_WINDOW_DEFAULT_HEIGHT:
-		*value = s->win && s->win->height > 0 ? s->win->height : s->h;
-		break;
-	case NATIVE_WINDOW_FORMAT:
-		*value = f ? f->hal : 0;
-		break;
-	case NATIVE_WINDOW_MIN_UNDEQUEUED_BUFFERS:
-	case NATIVE_WINDOW_QUEUES_TO_WINDOW_COMPOSER:
-	case NATIVE_WINDOW_LAYER_COUNT:
-		*value = 1;
-		break;
-	case NATIVE_WINDOW_CONCRETE_TYPE:
-		*value = NATIVE_WINDOW_SURFACE;
-		break;
-	case NATIVE_WINDOW_CONSUMER_USAGE_BITS:
-		*value = CONSUMER_USAGE;
-		break;
-	case NATIVE_WINDOW_IS_VALID:
-		*value = s->win != NULL;
-		break;
-	case NATIVE_WINDOW_MAX_BUFFER_COUNT:
-		*value = NWIN;
-		break;
-	case NATIVE_WINDOW_TRANSFORM_HINT:
-	case NATIVE_WINDOW_CONSUMER_RUNNING_BEHIND:
-	case NATIVE_WINDOW_STICKY_TRANSFORM:
-	case NATIVE_WINDOW_DEFAULT_DATASPACE:
-	case NATIVE_WINDOW_BUFFER_AGE:		/* 0: apps redraw whole frames */
-	case NATIVE_WINDOW_LAST_DEQUEUE_DURATION:
-	case NATIVE_WINDOW_LAST_QUEUE_DURATION:
-	case NATIVE_WINDOW_FRAME_TIMESTAMPS_SUPPORTS_PRESENT:
-	case NATIVE_WINDOW_CONSUMER_IS_PROTECTED:
-	case NATIVE_WINDOW_DATASPACE:
-		*value = 0;
-		break;
-	default:
-		return -EINVAL;
-	}
-	return 0;
-}
-
-static int win_perform(struct ANativeWindow *w, int op, ...)
-{
-	struct shim_surf *s = SURF_OF(w);
-	uint32_t fourcc;
-	va_list ap;
-	int ret = 0;
-
-	va_start(ap, op);
-	switch (op) {
-	case NATIVE_WINDOW_SET_BUFFERS_FORMAT:
-		fourcc = hal_fourcc(va_arg(ap, int));
-		if (fourcc)
-			s->fourcc = fourcc;
-		break;
-	case NATIVE_WINDOW_SET_SHARED_BUFFER_MODE:
-	case NATIVE_WINDOW_SET_AUTO_REFRESH:
-		ret = va_arg(ap, int) ? -EINVAL : 0;
-		break;
-	case NATIVE_WINDOW_GET_REFRESH_CYCLE_DURATION:
-		*va_arg(ap, int64_t *) = 16666667;
-		break;
-	case NATIVE_WINDOW_GET_NEXT_FRAME_ID:
-		*va_arg(ap, uint64_t *) = s->frame_id + 1;
-		break;
-	case NATIVE_WINDOW_GET_WIDE_COLOR_SUPPORT:
-	case NATIVE_WINDOW_GET_HDR_SUPPORT:
-		*va_arg(ap, bool *) = false;
-		break;
-	case NATIVE_WINDOW_GET_CONSUMER_USAGE64:
-		*va_arg(ap, uint64_t *) = CONSUMER_USAGE;
-		break;
-	case NATIVE_WINDOW_GET_LAST_DEQUEUE_START:
-	case NATIVE_WINDOW_GET_LAST_DEQUEUE_DURATION:
-	case NATIVE_WINDOW_GET_LAST_QUEUE_DURATION:
-		*va_arg(ap, int64_t *) = 0;
-		break;
-	case NATIVE_WINDOW_SET_USAGE:
-	case NATIVE_WINDOW_CONNECT:
-	case NATIVE_WINDOW_DISCONNECT:
-	case NATIVE_WINDOW_SET_CROP:
-	case NATIVE_WINDOW_SET_BUFFER_COUNT:
-	case NATIVE_WINDOW_SET_BUFFERS_GEOMETRY:
-	case NATIVE_WINDOW_SET_BUFFERS_TRANSFORM:
-	case NATIVE_WINDOW_SET_BUFFERS_TIMESTAMP:
-	case NATIVE_WINDOW_SET_BUFFERS_DIMENSIONS:
-	case NATIVE_WINDOW_SET_SCALING_MODE:
-	case NATIVE_WINDOW_API_CONNECT:
-	case NATIVE_WINDOW_API_DISCONNECT:
-	case NATIVE_WINDOW_SET_BUFFERS_USER_DIMENSIONS:
-	case NATIVE_WINDOW_SET_BUFFERS_STICKY_TRANSFORM:
-	case NATIVE_WINDOW_SET_BUFFERS_DATASPACE:
-	case NATIVE_WINDOW_SET_SURFACE_DAMAGE:
-	case NATIVE_WINDOW_ENABLE_FRAME_TIMESTAMPS:
-	case NATIVE_WINDOW_SET_USAGE64:
-	case NATIVE_WINDOW_SET_BUFFERS_SMPTE2086_METADATA:
-	case NATIVE_WINDOW_SET_BUFFERS_CTA861_3_METADATA:
-	case NATIVE_WINDOW_SET_BUFFERS_HDR10_PLUS_METADATA:
-	case NATIVE_WINDOW_SET_AUTO_PREROTATION:
-	case NATIVE_WINDOW_SET_DEQUEUE_TIMEOUT:
-	case NATIVE_WINDOW_SET_FRAME_RATE:
-	case NATIVE_WINDOW_ALLOCATE_BUFFERS:
-		break;		/* nothing to set up: buffers follow the Wayland window */
-	default:
-		ret = -ENOENT;
-		break;
-	}
-	va_end(ap);
-	return ret;
-}
-
 static void free_surface(struct shim_surf *s);
 
-static void win_ref(struct android_native_base_t *base)
-{
-	pthread_mutex_lock(&lock);
-	SURF_OF((struct ANativeWindow *)base)->refs++;
-	pthread_mutex_unlock(&lock);
-}
-
-static void win_unref(struct android_native_base_t *base)
-{
-	struct shim_surf *s = SURF_OF((struct ANativeWindow *)base);
-	int last;
-
-	pthread_mutex_lock(&lock);
-	last = !--s->refs && s->dead;
-	pthread_mutex_unlock(&lock);
-	if (last)
-		free_surface(s);
-}
-
-/* The blob's own window surface over s->anw; NO_SURFACE to fall back to a pbuffer */
+/* The blob's own window surface over a hybris-window; NO_SURFACE to fall back to a pbuffer */
 static EGLSurface create_native(struct shim_surf *s, const EGLint *attr)
 {
-	EGLint visual = 0;
+	struct hyb_window_config c = {
+		.display = wl.wl, .surface = s->win->surface, .dmabuf = wl.dmabuf, .formats = wl.fmt,
+		.egl = s->win, .sync_files = sync_files, .stats = stats,
+	};
 	EGLSurface real;
 
-	real_eglGetConfigAttrib(s->dpy, s->cfg, EGL_NATIVE_VISUAL_ID, &visual);
-	s->fourcc = hal_fourcc(visual);
-	if (!s->fourcc)
-		s->fourcc = HYB_XBGR8888;
-	pthread_mutex_init(&s->mutex, NULL);
-	memcpy(&s->anw, &(struct ANativeWindow){
-		.common = {
-			.magic = ANDROID_NATIVE_WINDOW_MAGIC,
-			.version = sizeof(struct ANativeWindow),
-			.incRef = win_ref,
-			.decRef = win_unref,
-		},
-		.minSwapInterval = 0,
-		.maxSwapInterval = 1,
-		.setSwapInterval = win_interval,
-		.dequeueBuffer_DEPRECATED = win_dequeue_old,
-		.lockBuffer_DEPRECATED = win_lock_old,
-		.queueBuffer_DEPRECATED = win_queue_old,
-		.query = win_query,
-		.perform = win_perform,
-		.cancelBuffer_DEPRECATED = win_cancel_old,
-		.dequeueBuffer = win_dequeue,
-		.queueBuffer = win_queue,
-		.cancelBuffer = win_cancel,
-	}, sizeof(s->anw));
-	s->native = 1;
-	real = real_eglCreateWindowSurface(s->dpy, s->cfg, (EGLNativeWindowType)(uintptr_t)&s->anw, attr);
+	real_eglGetConfigAttrib(s->dpy, s->cfg, EGL_NATIVE_VISUAL_ID, &c.hal_format);
+	s->native = hyb_window_create(&c);
+	if (!s->native)
+		return EGL_NO_SURFACE;
+	real = real_eglCreateWindowSurface(s->dpy, s->cfg,
+					   (EGLNativeWindowType)(uintptr_t)hyb_window_native(s->native), attr);
 	if (real == EGL_NO_SURFACE) {
-		s->native = 0;
-		pthread_mutex_destroy(&s->mutex);
+		hyb_window_detach(s->native);
+		hyb_window_unref(s->native);
+		s->native = NULL;
 	}
 	return real;
 }
@@ -1394,32 +939,21 @@ static EGLSurface create_window(EGLDisplay d, EGLConfig c, void *native, const E
 	for (int i = 0; i < NBUF; i++)
 		s->buf[i].dmafd = -1;
 	live_surfaces++;
-	s->queue = wl_display_create_queue(wl.wl);
-	s->surf = wl_proxy_create_wrapper(win->surface);
-	wl_proxy_set_queue((struct wl_proxy *)s->surf, s->queue);
-	s->shm = wl_proxy_create_wrapper(wl.shm);
-	wl_proxy_set_queue((struct wl_proxy *)s->shm, s->queue);
-	if (wl.dmabuf) {
-		s->dmabuf = wl_proxy_create_wrapper(wl.dmabuf);
-		wl_proxy_set_queue((struct wl_proxy *)s->dmabuf, s->queue);
-	}
 	if (native_windows())
 		s->real = create_native(s, attr);
 	if (!s->native) {
 		EGLint pa[] = { EGL_WIDTH, s->w, EGL_HEIGHT, s->h, EGL_NONE };
 
+		s->queue = wl_display_create_queue(wl.wl);
+		s->surf = wl_proxy_create_wrapper(win->surface);
+		wl_proxy_set_queue((struct wl_proxy *)s->surf, s->queue);
+		s->shm = wl_proxy_create_wrapper(wl.shm);
+		wl_proxy_set_queue((struct wl_proxy *)s->shm, s->queue);
 		s->zero_copy = can_zero_copy(d);
 		s->real = real_eglCreatePbufferSurface(d, c, pa);
 	}
 	if (s->real == EGL_NO_SURFACE) {
-		int last;
-
-		pthread_mutex_lock(&lock);
-		s->dead = 1;
-		last = !s->refs;
-		pthread_mutex_unlock(&lock);
-		if (last)
-			free_surface(s);
+		free_surface(s);
 		return EGL_NO_SURFACE;
 	}
 	win->driver_private = s;
@@ -1459,17 +993,18 @@ EXPORT EGLSurface eglCreatePlatformWindowSurface(EGLDisplay d, EGLConfig c, void
 	return create_window(d, c, w, ia);
 }
 
+/* A native window still current anywhere lives on until the blob's last decRef */
 static void free_surface(struct shim_surf *s)
 {
-	for (int i = 0; i < NWIN; i++)
-		drop_buffer(&s->nbuf[i]);
-	if (s->native)
-		pthread_mutex_destroy(&s->mutex);
-	wl_proxy_wrapper_destroy(s->surf);
-	wl_proxy_wrapper_destroy(s->shm);
-	if (s->dmabuf)
-		wl_proxy_wrapper_destroy(s->dmabuf);
-	wl_event_queue_destroy(s->queue);
+	if (s->native) {
+		hyb_window_detach(s->native);
+		hyb_window_unref(s->native);
+	}
+	if (s->queue) {
+		wl_proxy_wrapper_destroy(s->surf);
+		wl_proxy_wrapper_destroy(s->shm);
+		wl_event_queue_destroy(s->queue);
+	}
 	free(s);
 	live_surfaces--;
 }
@@ -1477,7 +1012,6 @@ static void free_surface(struct shim_surf *s)
 EXPORT EGLBoolean eglDestroySurface(EGLDisplay d, EGLSurface surf)
 {
 	struct shim_surf *s = lookup(surf), **pp;
-	int last;
 
 	init();
 	if (!s)
@@ -1489,8 +1023,6 @@ EXPORT EGLBoolean eglDestroySurface(EGLDisplay d, EGLSurface surf)
 			break;
 		}
 	pthread_mutex_unlock(&lock);
-	if (s->native)
-		pthread_mutex_lock(&s->mutex);
 	if (s->frame)
 		wl_callback_destroy(s->frame);
 	s->frame = NULL;
@@ -1502,15 +1034,9 @@ EXPORT EGLBoolean eglDestroySurface(EGLDisplay d, EGLSurface surf)
 		s->win = NULL;
 	}
 	if (s->native)
-		pthread_mutex_unlock(&s->mutex);
+		hyb_window_detach(s->native);
 	real_eglDestroySurface(d, s->real);
-	/* a native window still current anywhere goes with the blob's last decRef */
-	pthread_mutex_lock(&lock);
-	s->dead = 1;
-	last = !s->native || !s->refs;
-	pthread_mutex_unlock(&lock);
-	if (last)
-		free_surface(s);
+	free_surface(s);
 	return EGL_TRUE;
 }
 

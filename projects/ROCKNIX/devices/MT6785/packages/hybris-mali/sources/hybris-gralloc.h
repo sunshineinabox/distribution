@@ -57,6 +57,8 @@ static const struct hyb_format hyb_formats[] = {
 	{ HYB_BGR888, HYB_BGR888, 3, 3, 2 },		/* RGB_888 */
 };
 
+#define HYB_NFORMATS (sizeof(hyb_formats) / sizeof(hyb_formats[0]))
+
 static inline const struct hyb_format *hyb_format(uint32_t fourcc)
 {
 	for (size_t i = 0; i < sizeof(hyb_formats) / sizeof(hyb_formats[0]); i++)
@@ -158,9 +160,8 @@ static inline int hyb_dmabuf_alloc(size_t size)
 #ifndef HYBRIS_GRALLOC_LAYOUT_ONLY
 struct hyb_buffer;
 
-/* Install the IMapper hook, with the caller's own symbol hooks behind it; must run before
- * the blob is loaded */
-int hyb_gralloc_init(void *(*hook_more)(const char *sym, const char *requester));
+/* Install the IMapper and thread hooks; must run before the blob is loaded */
+int hyb_gralloc_init(void);
 
 /* Wrap one dma-buf plane, taking ownership of fd; NULL if the blob cannot use it */
 struct hyb_buffer *hyb_buffer_wrap(int fd, int width, int height, uint32_t fourcc,

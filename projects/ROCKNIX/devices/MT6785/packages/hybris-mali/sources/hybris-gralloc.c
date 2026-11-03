@@ -4,10 +4,12 @@
 // without an Android allocator or servicemanager.
 #define _GNU_SOURCE
 #include <dlfcn.h>
+#include <sched.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/prctl.h>
 #include "hybris-gralloc.h"
 
 #define HIDDEN __attribute__((visibility("hidden")))
@@ -15,7 +17,6 @@
 static void *(*android_dlopen)(const char *name, int flags);
 static void *(*android_dlsym)(void *handle, const char *sym);
 static void (*set_hook)(void *(*cb)(const char *sym, const char *requester));
-static void *(*caller_hook)(const char *sym, const char *requester);
 static int debug;
 
 /* HIDL / libutils object layouts on Android 11 arm64 */
@@ -345,17 +346,37 @@ HIDDEN void get_service_c(void **out)
 	refbase_incstrong(&mapper.rb_vptr, out);
 }
 
+/* The blob names its mali- threads with prctl. They are too light for the scheduler to move
+ * off the little cores, so they get a utilization floor like Android's top-app boost */
+static int (*next_prctl)(int option, unsigned long a2, unsigned long a3, unsigned long a4, unsigned long a5);
+static unsigned int uclamp_min = 512;
+
+static int blob_prctl(int option, unsigned long a2, unsigned long a3, unsigned long a4, unsigned long a5)
+{
+	struct sched_attr attr = {
+		.size = sizeof(attr),
+		.sched_flags = SCHED_FLAG_KEEP_ALL | SCHED_FLAG_UTIL_CLAMP_MIN,
+		.sched_util_min = uclamp_min,
+	};
+
+	if (option == PR_SET_NAME && a2 && uclamp_min && !strncmp((const char *)a2, "mali-", 5))
+		sched_setattr(0, &attr, 0);
+	return next_prctl ? next_prctl(option, a2, a3, a4, a5) : prctl(option, a2, a3, a4, a5);
+}
+
 static void *hook(const char *sym, const char *requester)
 {
+	if (!strcmp(sym, "prctl"))
+		return blob_prctl;
 	if (strstr(sym, "mapper4V4_07IMapper10getService")) {
 		if (debug)
 			fprintf(stderr, "hybris-gralloc: %s for %s\n", sym, requester);
 		return hyb_get_service;
 	}
-	return caller_hook ? caller_hook(sym, requester) : NULL;
+	return NULL;
 }
 
-int hyb_gralloc_init(void *(*hook_more)(const char *sym, const char *requester))
+int hyb_gralloc_init(void)
 {
 	void *slots[32] = {
 		hyb_slot_0, hyb_slot_1, hyb_slot_2, hyb_slot_3, hyb_slot_4, hyb_slot_5, hyb_slot_6,
@@ -364,9 +385,13 @@ int hyb_gralloc_init(void *(*hook_more)(const char *sym, const char *requester))
 		hyb_slot_21, hyb_slot_22, hyb_slot_23, hyb_slot_24, hyb_slot_25, hyb_slot_26, hyb_slot_27,
 		hyb_slot_28, hyb_slot_29, hyb_slot_30, hyb_slot_31,
 	};
+	const char *clamp = getenv("HYBRIS_SHIM_UCLAMP_MIN");
 	void *utils;
 
 	debug = getenv("HYBRIS_GRALLOC_DEBUG") != NULL;
+	if (clamp)
+		uclamp_min = atoi(clamp);
+	next_prctl = (__typeof__(next_prctl))dlsym(RTLD_DEFAULT, "_hybris_hook_prctl");
 	android_dlopen = dlsym(RTLD_DEFAULT, "android_dlopen");
 	android_dlsym = dlsym(RTLD_DEFAULT, "android_dlsym");
 	set_hook = dlsym(RTLD_DEFAULT, "hybris_set_hook_callback");
@@ -386,7 +411,6 @@ int hyb_gralloc_init(void *(*hook_more)(const char *sym, const char *requester))
 	mapper.vptr = &vtbl[3];
 	refbase_ctor(&mapper.rb_vptr);
 	refbase_incstrong(&mapper.rb_vptr, &mapper);	/* never dropped */
-	caller_hook = hook_more;
 	set_hook(hook);
 	return 0;
 }

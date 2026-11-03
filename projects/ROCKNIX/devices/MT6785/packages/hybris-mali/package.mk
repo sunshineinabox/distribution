@@ -15,9 +15,10 @@ make_target() {
 
   ${TOOLCHAIN}/bin/wayland-scanner client-header ${DMABUF_XML} linux-dmabuf-v1-client-protocol.h
   ${TOOLCHAIN}/bin/wayland-scanner private-code ${DMABUF_XML} linux-dmabuf-v1-protocol.c
-  ${CC} ${CFLAGS} -fPIC -shared -fvisibility=hidden -Wl,-soname,libEGL.so.1 \
+  # libhybris and the blob keep pointers into the shim (hooks, the mapper) to the end
+  ${CC} ${CFLAGS} -fPIC -shared -fvisibility=hidden -Wl,-soname,libEGL.so.1 -Wl,-z,nodelete \
     -I. -I${SYSROOT_PREFIX}/usr/include/android \
-    -o libEGL.so.1 egl-wayland-shim.c hybris-gralloc.c linux-dmabuf-v1-protocol.c \
+    -o libEGL.so.1 egl-wayland-shim.c hybris-gralloc.c hybris-window.c linux-dmabuf-v1-protocol.c \
     ${LDFLAGS} -lwayland-client -ldl -lpthread
   ${CC} ${CFLAGS} -fPIC -shared -fvisibility=hidden -Wl,-soname,libgbm.so.1 \
     -o libgbm.so.1 gbm.c -I${SYSROOT_PREFIX}/usr/include/libdrm ${LDFLAGS} -ldrm
