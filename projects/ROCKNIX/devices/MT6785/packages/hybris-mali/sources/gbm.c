@@ -81,8 +81,16 @@ EXPORT int gbm_device_get_format_modifier_plane_count(struct gbm_device *gbm, ui
 static struct gbm_bo *new_bo(struct gbm_device *gbm, int fd, uint32_t width, uint32_t height,
 			     uint32_t format, uint64_t modifier, uint32_t pitch, uint32_t offset)
 {
-	struct gbm_bo *bo = calloc(1, sizeof(*bo));
+	struct gbm_bo *bo;
 
+	if (fd < 0)
+		return NULL;	/* the dup's errno stands */
+	if (!hyb_size_ok(width, height)) {
+		close(fd);
+		errno = EINVAL;
+		return NULL;
+	}
+	bo = calloc(1, sizeof(*bo));
 	if (!bo) {
 		close(fd);
 		errno = ENOMEM;
@@ -109,7 +117,7 @@ static struct gbm_bo *create(struct gbm_device *gbm, uint32_t width, uint32_t he
 	size_t size;
 	int fd;
 
-	if (!f || !width || !height) {
+	if (!f || !hyb_size_ok(width, height)) {
 		errno = EINVAL;
 		return NULL;
 	}

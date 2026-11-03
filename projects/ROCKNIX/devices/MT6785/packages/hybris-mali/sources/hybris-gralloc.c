@@ -132,7 +132,10 @@ static int encode_std(const struct hyb_handle *h, const struct metadata_type *t,
 	uint64_t mod = (uint64_t)h->mod_hi << 32 | h->mod_lo;
 	int afbc = hyb_is_afbc(mod);
 	int bw = afbc ? HYB_AFBC_W : 1, bh = afbc ? HYB_AFBC_H : 1;
+	const struct hyb_format *f = hyb_format(h->fourcc);
 
+	if (!f)
+		return ERR_UNSUPPORTED;
 	put64(e, t->name.size);
 	put(e, t->name.buf, t->name.size);
 	put64(e, t->value);
@@ -158,7 +161,7 @@ static int encode_std(const struct hyb_handle *h, const struct metadata_type *t,
 		put64(e, 1);
 		put_components(e, h->fourcc);
 		put64(e, 0);						/* offsetInBytes */
-		put64(e, hyb_format(h->fourcc)->cpp * 8);		/* sampleIncrementInBits */
+		put64(e, f->cpp * 8);					/* sampleIncrementInBits */
 		put64(e, h->stride);					/* strideInBytes */
 		put64(e, (h->width + bw - 1) / bw * bw);		/* widthInSamples */
 		put64(e, (h->height + bh - 1) / bh * bh);		/* heightInSamples */
@@ -414,7 +417,7 @@ struct hyb_buffer *hyb_buffer_wrap(int fd, int width, int height, uint32_t fourc
 
 	if (modifier == HYB_MOD_INVALID)
 		modifier = HYB_MOD_LINEAR;
-	if (!hyb_supported(f, modifier) || offset || width <= 0 || height <= 0 || size <= 0)
+	if (!hyb_supported(f, modifier) || offset || !hyb_size_ok(width, height) || size <= 0)
 		goto fail;
 	if (hyb_is_afbc(modifier)) {
 		if (size < (off_t)hyb_layout(width, height, f, modifier, &want_pitch))
@@ -457,7 +460,7 @@ struct hyb_buffer *hyb_buffer_alloc(int width, int height, uint32_t fourcc, uint
 	uint32_t pitch;
 	int fd;
 
-	if (!f)
+	if (!f || !hyb_size_ok(width, height))
 		return NULL;
 	fd = hyb_dmabuf_alloc(hyb_layout(width, height, f, modifier, &pitch));
 	return fd < 0 ? NULL : hyb_buffer_wrap(fd, width, height, fourcc, modifier, 0, pitch);

@@ -26,6 +26,14 @@
 #define HYB_MOD_AFBC 0x0800000000000062ULL
 #define HYB_MOD_AFBC_YTR 0x0800000000000072ULL
 
+/* The blob's largest surface, which also keeps the layout arithmetic in range */
+#define HYB_MAX_DIM 16384
+
+static inline int hyb_size_ok(long w, long h)
+{
+	return w > 0 && h > 0 && w <= HYB_MAX_DIM && h <= HYB_MAX_DIM;
+}
+
 /* AFBC superblocks and the Arm header-to-body alignment the blob writes */
 #define HYB_AFBC_W 32
 #define HYB_AFBC_H 8
@@ -88,6 +96,8 @@ static inline uint64_t hyb_pick_modifier(const struct hyb_format *f, int w, int 
 {
 	int linear = !n, afbc = 0, ytr = 0;
 
+	if (!f)
+		return HYB_MOD_INVALID;
 	for (unsigned int i = 0; i < n; i++) {
 		linear |= mods[i] == HYB_MOD_LINEAR || mods[i] == HYB_MOD_INVALID;
 		afbc |= mods[i] == HYB_MOD_AFBC;
