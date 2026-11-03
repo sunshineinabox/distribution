@@ -1,0 +1,86 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Mon, 2 Nov 2026 14:00:00 -0800
+Subject: [PATCH] output: compose in the RGB-ordered twin when only it compresses
+
+Mali writes AFBC in RGB order only, so XRGB8888 swapchains on the Android
+blob stay linear. With WLR_OUTPUT_RGB_ORDER_TWIN set, compose in the
+RGB-ordered twin format when only the twin can be tiled or compressed.
+
+diff --git a/types/output/swapchain.c b/types/output/swapchain.c
+index 01857a2..f21eb3f 100644
+--- a/types/output/swapchain.c
++++ b/types/output/swapchain.c
+@@ -8,6 +8,7 @@
+ 
+ #include "render/drm_format_set.h"
+ #include "types/wlr_output.h"
++#include "util/env.h"
+ 
+ static struct wlr_swapchain *create_swapchain(struct wlr_output *output,
+ 		int width, int height, uint32_t render_format, bool allow_modifiers) {
+@@ -48,6 +49,57 @@ static struct wlr_swapchain *create_swapchain(struct wlr_output *output,
+ 	return swapchain;
+ }
+ 
++static uint32_t rgb_ordered_twin(uint32_t format) {
++	switch (format) {
++	case DRM_FORMAT_XRGB8888:
++		return DRM_FORMAT_XBGR8888;
++	case DRM_FORMAT_ARGB8888:
++		return DRM_FORMAT_ABGR8888;
++	case DRM_FORMAT_XRGB2101010:
++		return DRM_FORMAT_XBGR2101010;
++	case DRM_FORMAT_ARGB2101010:
++		return DRM_FORMAT_ABGR2101010;
++	}
++	return DRM_FORMAT_INVALID;
++}
++
++static bool format_has_layout_modifier(struct wlr_output *output, uint32_t render_format) {
++	const struct wlr_drm_format_set *display_formats =
++		wlr_output_get_primary_formats(output, output->allocator->buffer_caps);
++	struct wlr_drm_format format = {0};
++	bool found = false;
++
++	if (!output_pick_format(output, display_formats, &format, render_format)) {
++		return false;
++	}
++	for (size_t i = 0; i < format.len; i++) {
++		found |= format.modifiers[i] != DRM_FORMAT_MOD_LINEAR &&
++			format.modifiers[i] != DRM_FORMAT_MOD_INVALID;
++	}
++	wlr_drm_format_finish(&format);
++	return found;
++}
++
++// Mali writes AFBC in RGB order only, so compose in the RGB-ordered twin
++// when only the twin can be tiled or compressed
++static uint32_t pick_render_format(struct wlr_output *output,
++		const struct wlr_swapchain *old_swapchain, uint32_t format) {
++	static int enabled = -1;
++	uint32_t twin = rgb_ordered_twin(format);
++
++	if (enabled < 0) {
++		enabled = env_parse_bool("WLR_OUTPUT_RGB_ORDER_TWIN");
++	}
++	if (!enabled || twin == DRM_FORMAT_INVALID) {
++		return format;
++	}
++	if (old_swapchain != NULL && old_swapchain->format.format == twin) {
++		return twin;
++	}
++	return !format_has_layout_modifier(output, format) &&
++		format_has_layout_modifier(output, twin) ? twin : format;
++}
++
+ static bool test_swapchain(struct wlr_output *output,
+ 		struct wlr_swapchain *swapchain, const struct wlr_output_state *state) {
+ 	struct wlr_buffer *buffer = wlr_swapchain_acquire(swapchain);
+@@ -78,6 +130,7 @@ bool wlr_output_configure_primary_swapchain(struct wlr_output *output,
+ 	if (state->committed & WLR_OUTPUT_STATE_RENDER_FORMAT) {
+ 		format = state->render_format;
+ 	}
++	format = pick_render_format(output, *swapchain_ptr, format);
+ 
+ 	// Re-use the existing swapchain if possible
+ 	struct wlr_swapchain *old_swapchain = *swapchain_ptr;
