@@ -29,7 +29,7 @@ index 6b852dc..8d62232 100644
  
  bool is_gles2_pixel_format_supported(const struct wlr_gles2_renderer *renderer,
 diff --git a/render/gles2/pass.c b/render/gles2/pass.c
-index b10ac04..a378453 100644
+index b10ac04..099e0b0 100644
 --- a/render/gles2/pass.c
 +++ b/render/gles2/pass.c
 @@ -1,10 +1,12 @@
@@ -45,15 +45,33 @@ index b10ac04..a378453 100644
  #include "render/egl.h"
  #include "render/gles2.h"
  #include "util/matrix.h"
-@@ -19,6 +21,35 @@ static struct wlr_gles2_render_pass *get_render_pass(struct wlr_render_pass *wlr
+@@ -19,6 +21,47 @@ static struct wlr_gles2_render_pass *get_render_pass(struct wlr_render_pass *wlr
  	return pass;
  }
  
++static bool import_buffer_sync_file(struct wlr_buffer *buffer, uint32_t flags, int sync_file_fd) {
++	struct wlr_dmabuf_attributes dmabuf;
++	if (!wlr_buffer_get_dmabuf(buffer, &dmabuf)) {
++		return false;
++	}
++	bool ok = true;
++	for (int i = 0; i < dmabuf.n_planes; i++) {
++		ok = dmabuf_import_sync_file(dmabuf.fd[i], flags, sync_file_fd) && ok;
++	}
++	return ok;
++}
++
++static void fence_sampled_buffers(struct wlr_gles2_render_pass *pass, int sync_file_fd) {
++	struct wlr_buffer **buffer;
++	wl_array_for_each(buffer, &pass->sampled) {
++		import_buffer_sync_file(*buffer, DMA_BUF_SYNC_READ, sync_file_fd);
++	}
++}
++
 +// Without implicit sync in the driver, the pass's fence goes on the DMA-BUFs
 +// it wrote and read, for the display and the clients to wait on
 +static bool fence_pass_buffers(struct wlr_gles2_render_pass *pass) {
 +	struct wlr_gles2_renderer *renderer = pass->buffer->renderer;
-+	struct wlr_dmabuf_attributes dmabuf;
 +
 +	EGLSyncKHR sync = wlr_egl_create_sync(renderer->egl, -1);
 +	if (sync == EGL_NO_SYNC_KHR) {
@@ -66,14 +84,8 @@ index b10ac04..a378453 100644
 +		return false;
 +	}
 +
-+	bool ok = wlr_buffer_get_dmabuf(pass->buffer->buffer, &dmabuf) &&
-+		dmabuf_import_sync_file(dmabuf.fd[0], DMA_BUF_SYNC_WRITE, sync_file_fd);
-+	struct wlr_buffer **buffer;
-+	wl_array_for_each(buffer, &pass->sampled) {
-+		if (wlr_buffer_get_dmabuf(*buffer, &dmabuf)) {
-+			dmabuf_import_sync_file(dmabuf.fd[0], DMA_BUF_SYNC_READ, sync_file_fd);
-+		}
-+	}
++	bool ok = import_buffer_sync_file(pass->buffer->buffer, DMA_BUF_SYNC_WRITE, sync_file_fd);
++	fence_sampled_buffers(pass, sync_file_fd);
 +	close(sync_file_fd);
 +	return ok;
 +}
@@ -81,7 +93,14 @@ index b10ac04..a378453 100644
  static bool render_pass_submit(struct wlr_render_pass *wlr_pass) {
  	struct wlr_gles2_render_pass *pass = get_render_pass(wlr_pass);
  	struct wlr_gles2_renderer *renderer = pass->buffer->renderer;
-@@ -56,6 +87,10 @@ static bool render_pass_submit(struct wlr_render_pass *wlr_pass) {
+@@ -52,10 +95,17 @@ static bool render_pass_submit(struct wlr_render_pass *wlr_pass) {
+ 		}
+ 
+ 		ok = wlr_drm_syncobj_timeline_import_sync_file(pass->signal_timeline, pass->signal_point, sync_file_fd);
++		if (renderer->sync_files) {
++			fence_sampled_buffers(pass, sync_file_fd);
++		}
+ 		close(sync_file_fd);
  		if (!ok) {
  			goto out;
  		}
@@ -92,7 +111,7 @@ index b10ac04..a378453 100644
  	} else {
  		glFlush();
  	}
-@@ -69,6 +104,11 @@ out:
+@@ -69,6 +119,11 @@ out:
  	wlr_egl_restore_context(&pass->prev_ctx);
  
  	wlr_drm_syncobj_timeline_unref(pass->signal_timeline);
@@ -104,7 +123,7 @@ index b10ac04..a378453 100644
  	wlr_buffer_unlock(pass->buffer->buffer);
  	free(pass);
  
-@@ -164,6 +204,43 @@ static void setup_blending(enum wlr_render_blend_mode mode) {
+@@ -164,6 +219,45 @@ static void setup_blending(enum wlr_render_blend_mode mode) {
  	}
  }
  
@@ -130,25 +149,27 @@ index b10ac04..a378453 100644
 +	}
 +	*buffer = wlr_buffer_lock(texture->buffer->buffer);
 +
-+	int sync_file_fd = dmabuf_export_sync_file(dmabuf.fd[0], DMA_BUF_SYNC_READ);
-+	if (sync_file_fd < 0) {
-+		return;
-+	}
-+	struct pollfd pfd = { .fd = sync_file_fd, .events = POLLIN };
-+	if (poll(&pfd, 1, 0) == 0) {
-+		EGLSyncKHR sync = wlr_egl_create_sync(renderer->egl, sync_file_fd);
-+		if (sync != EGL_NO_SYNC_KHR) {
-+			wlr_egl_wait_sync(renderer->egl, sync);
-+			wlr_egl_destroy_sync(renderer->egl, sync);
++	for (int i = 0; i < dmabuf.n_planes; i++) {
++		int sync_file_fd = dmabuf_export_sync_file(dmabuf.fd[i], DMA_BUF_SYNC_READ);
++		if (sync_file_fd < 0) {
++			continue;
 +		}
++		struct pollfd pfd = { .fd = sync_file_fd, .events = POLLIN };
++		if (poll(&pfd, 1, 0) == 0) {
++			EGLSyncKHR sync = wlr_egl_create_sync(renderer->egl, sync_file_fd);
++			if (sync != EGL_NO_SYNC_KHR) {
++				wlr_egl_wait_sync(renderer->egl, sync);
++				wlr_egl_destroy_sync(renderer->egl, sync);
++			}
++		}
++		close(sync_file_fd);
 +	}
-+	close(sync_file_fd);
 +}
 +
  static void render_pass_add_texture(struct wlr_render_pass *wlr_pass,
  		const struct wlr_render_texture_options *options) {
  	struct wlr_gles2_render_pass *pass = get_render_pass(wlr_pass);
-@@ -221,6 +298,8 @@ static void render_pass_add_texture(struct wlr_render_pass *wlr_pass,
+@@ -221,6 +315,8 @@ static void render_pass_add_texture(struct wlr_render_pass *wlr_pass,
  		if (!ok) {
  			return;
  		}
@@ -157,7 +178,7 @@ index b10ac04..a378453 100644
  	}
  
  	setup_blending(!texture->has_alpha && alpha == 1.0 ?
-@@ -322,6 +401,7 @@ struct wlr_gles2_render_pass *begin_gles2_buffer_pass(struct wlr_gles2_buffer *b
+@@ -322,6 +418,7 @@ struct wlr_gles2_render_pass *begin_gles2_buffer_pass(struct wlr_gles2_buffer *b
  	wlr_render_pass_init(&pass->base, &render_pass_impl);
  	wlr_buffer_lock(wlr_buffer);
  	pass->buffer = buffer;
