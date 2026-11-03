@@ -15,6 +15,7 @@
 static void *(*android_dlopen)(const char *name, int flags);
 static void *(*android_dlsym)(void *handle, const char *sym);
 static void (*set_hook)(void *(*cb)(const char *sym, const char *requester));
+static void *(*caller_hook)(const char *sym, const char *requester);
 static int debug;
 
 /* HIDL / libutils object layouts on Android 11 arm64 */
@@ -348,10 +349,10 @@ static void *hook(const char *sym, const char *requester)
 			fprintf(stderr, "hybris-gralloc: %s for %s\n", sym, requester);
 		return hyb_get_service;
 	}
-	return NULL;
+	return caller_hook ? caller_hook(sym, requester) : NULL;
 }
 
-int hyb_gralloc_init(void)
+int hyb_gralloc_init(void *(*hook_more)(const char *sym, const char *requester))
 {
 	void *slots[32] = {
 		hyb_slot_0, hyb_slot_1, hyb_slot_2, hyb_slot_3, hyb_slot_4, hyb_slot_5, hyb_slot_6,
@@ -382,6 +383,7 @@ int hyb_gralloc_init(void)
 	mapper.vptr = &vtbl[3];
 	refbase_ctor(&mapper.rb_vptr);
 	refbase_incstrong(&mapper.rb_vptr, &mapper);	/* never dropped */
+	caller_hook = hook_more;
 	set_hook(hook);
 	return 0;
 }

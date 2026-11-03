@@ -14,6 +14,7 @@
 #include <linux/udmabuf.h>
 #include <poll.h>
 #include <pthread.h>
+#include <sched.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -23,6 +24,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/prctl.h>
 #include <system/window.h>
 #include <time.h>
 #include <unistd.h>
@@ -185,15 +187,43 @@ static struct shim_image *images;
 static __thread EGLint shim_error;
 static int stats, force_readback, gralloc, sync_files;
 
+/* The blob names its threads with prctl. Its mali- ones (mali-cmar-backend submits all the
+ * GPU work) are too light for the scheduler to move off the little cores, so they get a
+ * utilization floor, as Android's top-app boost gives them */
+static int (*next_prctl)(int option, unsigned long a2, unsigned long a3, unsigned long a4, unsigned long a5);
+static unsigned int uclamp_min = 512;
+
+static int blob_prctl(int option, unsigned long a2, unsigned long a3, unsigned long a4, unsigned long a5)
+{
+	struct sched_attr attr = {
+		.size = sizeof(attr),
+		.sched_flags = SCHED_FLAG_KEEP_ALL | SCHED_FLAG_UTIL_CLAMP_MIN,
+		.sched_util_min = uclamp_min,
+	};
+
+	if (option == PR_SET_NAME && a2 && uclamp_min && !strncmp((const char *)a2, "mali-", 5))
+		sched_setattr(0, &attr, 0);
+	return next_prctl ? next_prctl(option, a2, a3, a4, a5) : prctl(option, a2, a3, a4, a5);
+}
+
+static void *blob_hook(const char *sym, const char *requester)
+{
+	return !strcmp(sym, "prctl") ? (void *)blob_prctl : NULL;
+}
+
 static void load(void)
 {
 	const char *path = getenv("HYBRIS_SHIM_REAL_EGL");
 	const char *copy = getenv("HYBRIS_SHIM_COPY");
 	const char *sync = getenv("WLR_GLES2_SYNC_FILES");
+	const char *clamp = getenv("HYBRIS_SHIM_UCLAMP_MIN");
 	void *h, *g;
 
-	/* the mapper hook has to be in place before the blob is loaded */
-	gralloc = hyb_gralloc_init() == 0;
+	if (clamp)
+		uclamp_min = atoi(clamp);
+	next_prctl = (__typeof__(next_prctl))dlsym(RTLD_DEFAULT, "_hybris_hook_prctl");
+	/* the mapper and prctl hooks have to be in place before the blob is loaded */
+	gralloc = hyb_gralloc_init(blob_hook) == 0;
 	h = dlopen(path ? path : REAL_EGL, RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND);
 	g = dlopen("libGLESv2.so.2", RTLD_NOW | RTLD_GLOBAL);
 	stats = getenv("HYBRIS_SHIM_STATS") != NULL;

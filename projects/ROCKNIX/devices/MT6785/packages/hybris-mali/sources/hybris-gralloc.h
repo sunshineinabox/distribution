@@ -148,8 +148,9 @@ static inline int hyb_dmabuf_alloc(size_t size)
 #ifndef HYBRIS_GRALLOC_LAYOUT_ONLY
 struct hyb_buffer;
 
-/* Install the IMapper hook; must run before the blob is loaded */
-int hyb_gralloc_init(void);
+/* Install the IMapper hook, with the caller's own symbol hooks behind it; must run before
+ * the blob is loaded */
+int hyb_gralloc_init(void *(*hook_more)(const char *sym, const char *requester));
 
 /* Wrap one dma-buf plane, taking ownership of fd; NULL if the blob cannot use it */
 struct hyb_buffer *hyb_buffer_wrap(int fd, int width, int height, uint32_t fourcc,
