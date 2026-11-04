@@ -1,0 +1,457 @@
+From ada369ea5ee54beb267e11058d3d721745f23f45 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Wed, 4 Nov 2026 06:54:05 -0800
+Subject: [PATCH 16/16] panvk/jm: enable transaction elimination
+
+Enable CRCs on v7 and invalidate them on JM by zeroing the CRC table with
+a fill job wherever v10+ invalidates it. The framebuffer descriptor always
+reserves the ZS/CRC extension since its use depends on the CRC target
+chosen at batch close.
+---
+ src/panfrost/vulkan/csf/panvk_vX_cmd_buffer.c | 27 +------
+ src/panfrost/vulkan/jm/panvk_cmd_buffer.h     |  8 ++
+ src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c  | 73 ++++++++++++++++---
+ src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c    | 30 +++++++-
+ src/panfrost/vulkan/jm/panvk_vX_cmd_event.c   |  3 +
+ src/panfrost/vulkan/panvk_image.c             |  2 +-
+ src/panfrost/vulkan/panvk_image.h             | 27 +++++++
+ src/panfrost/vulkan/panvk_vX_cmd_meta.c       | 60 ++++++++++-----
+ 8 files changed, 172 insertions(+), 58 deletions(-)
+
+diff --git a/src/panfrost/vulkan/csf/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/csf/panvk_vX_cmd_buffer.c
+index a7e2f72..29a5636 100644
+--- a/src/panfrost/vulkan/csf/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/csf/panvk_vX_cmd_buffer.c
+@@ -1192,31 +1192,6 @@ panvk_per_arch(CmdExecuteCommands)(VkCommandBuffer commandBuffer,
+    panvk_cmd_invalidate_state(primary);
+ }
+ 
+-static bool
+-image_barrier_invalidates_crc(const VkImageMemoryBarrier2 *barrier,
+-                              const struct panvk_image *image)
+-{
+-   if (barrier->oldLayout == VK_IMAGE_LAYOUT_PREINITIALIZED)
+-      return true;
+-
+-   const bool external_acquire =
+-      barrier->srcQueueFamilyIndex != barrier->dstQueueFamilyIndex &&
+-      (barrier->srcQueueFamilyIndex == VK_QUEUE_FAMILY_EXTERNAL ||
+-       barrier->srcQueueFamilyIndex == VK_QUEUE_FAMILY_FOREIGN_EXT);
+-
+-   if (!external_acquire)
+-      return false;
+-
+-   if (image->crc_safe_external)
+-      return false;
+-
+-   const VkExternalMemoryAcquireUnmodifiedEXT *unmodified =
+-      vk_find_struct_const(barrier->pNext,
+-                           EXTERNAL_MEMORY_ACQUIRE_UNMODIFIED_EXT);
+-
+-   return !unmodified || !unmodified->acquireUnmodifiedMemory;
+-}
+-
+ static uint64_t
+ panvk_per_arch(image_barrier_crc_header_addr)(
+    const VkImageMemoryBarrier2 *barrier)
+@@ -1230,7 +1205,7 @@ panvk_per_arch(image_barrier_crc_header_addr)(
+ 
+    VK_FROM_HANDLE(panvk_image, image, barrier->image);
+ 
+-   if (!image_barrier_invalidates_crc(barrier, image))
++   if (!panvk_image_barrier_invalidates_crc(barrier, image))
+       return 0;
+ 
+    return panvk_image_plane_crc_header_addr(image);
+diff --git a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+index 9b7c0eb..f2132d6 100644
+--- a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
++++ b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+@@ -167,6 +167,14 @@ struct panvk_batch *
+ 
+ void panvk_per_arch(cmd_close_batch)(struct panvk_cmd_buffer *cmdbuf);
+ 
++struct pan_image_plane;
++
++void panvk_per_arch(cmd_invalidate_crc)(struct panvk_cmd_buffer *cmdbuf,
++                                        const struct pan_image_plane *plane);
++
++void panvk_per_arch(cmd_invalidate_barrier_crcs)(
++   struct panvk_cmd_buffer *cmdbuf, const VkDependencyInfo *info);
++
+ VkResult panvk_per_arch(cmd_alloc_fb_desc)(struct panvk_cmd_buffer *cmdbuf);
+ 
+ VkResult panvk_per_arch(cmd_alloc_tls_desc)(struct panvk_cmd_buffer *cmdbuf,
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+index 5e55554..5a5f9d2 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -21,6 +21,7 @@
+ #include "panvk_cmd_push_constant.h"
+ #include "panvk_device.h"
+ #include "panvk_entrypoints.h"
++#include "panvk_image.h"
+ #include "panvk_instance.h"
+ #include "panvk_meta.h"
+ #include "panvk_physical_device.h"
+@@ -66,6 +67,50 @@ panvk_cmd_prepare_fragment_job(struct panvk_cmd_buffer *cmdbuf, uint64_t fbd)
+    return VK_SUCCESS;
+ }
+ 
++void
++panvk_per_arch(cmd_invalidate_barrier_crcs)(struct panvk_cmd_buffer *cmdbuf,
++                                            const VkDependencyInfo *info)
++{
++   for (uint32_t i = 0; i < info->imageMemoryBarrierCount; i++) {
++      const VkImageMemoryBarrier2 *barrier = &info->pImageMemoryBarriers[i];
++      VK_FROM_HANDLE(panvk_image, image, barrier->image);
++
++      if (barrier->subresourceRange.baseMipLevel == 0 &&
++          (barrier->subresourceRange.aspectMask & VK_IMAGE_ASPECT_COLOR_BIT) &&
++          panvk_image_plane_crc_header_addr(image) &&
++          panvk_image_barrier_invalidates_crc(barrier, image))
++         panvk_per_arch(cmd_invalidate_crc)(cmdbuf, &image->planes[0].plane);
++   }
++}
++
++/* Stored targets that don't get this pass's CRCs keep stale ones */
++static void
++invalidate_unselected_crc_rts(struct panvk_cmd_buffer *cmdbuf)
++{
++   const struct panvk_rendering_state *render = &cmdbuf->state.gfx.render;
++   const struct pan_fb_desc_info info = {
++      .fb = &render->fb.layout,
++      .store = render->fb.needs_store ? &render->fb.store
++                                      : &render->fb.spill.store,
++   };
++   struct pan_fb_crc_rt_info crc_info;
++   bool has_crc_rt = GENX(pan_fb_get_crc_rt_info)(&info, &crc_info);
++
++   for (uint32_t i = 0; i < info.fb->rt_count; i++) {
++      const struct pan_fb_store_target *rt = &info.store->rts[i];
++
++      if (!rt->store || !rt->crc_header_addr ||
++          (has_crc_rt && crc_info.rt == i))
++         continue;
++
++      const struct pan_image_plane_ref ref =
++         pan_image_view_get_color_plane(rt->iview);
++
++      panvk_per_arch(cmd_invalidate_crc)(cmdbuf,
++                                         ref.image->planes[ref.plane_idx]);
++   }
++}
++
+ void
+ panvk_per_arch(cmd_close_batch)(struct panvk_cmd_buffer *cmdbuf)
+ {
+@@ -106,6 +151,15 @@ panvk_per_arch(cmd_close_batch)(struct panvk_cmd_buffer *cmdbuf)
+ 
+    list_addtail(&batch->node, &cmdbuf->batches);
+ 
++   const bool emit_fbd = batch->fb.desc.cpu &&
++                         (batch->vtc_jc.first_tiler ||
++                          cmdbuf->state.gfx.render.fb.needs_store);
++
++   if (emit_fbd) {
++      panvk_per_arch(cmd_select_tile_size)(cmdbuf);
++      invalidate_unselected_crc_rts(cmdbuf);
++   }
++
+    if (batch->tlsinfo.tls.size) {
+       unsigned thread_tls_alloc =
+          pan_query_thread_tls_alloc(&phys_dev->kmod.dev->props);
+@@ -127,11 +181,7 @@ panvk_per_arch(cmd_close_batch)(struct panvk_cmd_buffer *cmdbuf)
+    if (batch->tls.cpu)
+       GENX(pan_emit_tls)(&batch->tlsinfo, batch->tls.cpu);
+ 
+-   if (batch->fb.desc.cpu &&
+-       (cmdbuf->cur_batch->vtc_jc.first_tiler ||
+-        cmdbuf->state.gfx.render.fb.needs_store)) {
+-      panvk_per_arch(cmd_select_tile_size)(cmdbuf);
+-
++   if (emit_fbd) {
+       /* At this point, we should know sample count and the tile size should
+        * have been calculated
+        */
+@@ -167,7 +217,7 @@ panvk_per_arch(cmd_close_batch)(struct panvk_cmd_buffer *cmdbuf)
+          util_bitcount(view_mask) :
+          batch->fb.layer_count;
+ 
+-      const bool has_zs_ext = pan_fb_has_zs(&render->fb.layout);
++      const bool has_zs_ext = GENX(pan_fb_needs_zs_crc_ext)(&fbd_info);
+       for (uint32_t i = 0; i < enabled_layer_count; i++) {
+          uint32_t layer_id = (view_mask != 0) ? u_bit_scan(&view_mask) : i;
+          VkResult result;
+@@ -215,13 +265,12 @@ panvk_per_arch(cmd_alloc_fb_desc)(struct panvk_cmd_buffer *cmdbuf)
+ 
+    struct panvk_rendering_state *render = &cmdbuf->state.gfx.render;
+    const struct pan_fb_layout *fb = &render->fb.layout;
+-   bool has_zs_ext = pan_fb_has_zs(fb);
+    batch->fb.layer_count = render->layer_count;
+-   unsigned fbd_size = pan_size(FRAMEBUFFER);
+ 
+-   if (has_zs_ext)
+-      fbd_size = ALIGN_POT(fbd_size, pan_alignment(ZS_CRC_EXTENSION)) +
+-                 pan_size(ZS_CRC_EXTENSION);
++   /* Whether the ZS/CRC extension is used is only known at batch close */
++   unsigned fbd_size =
++      ALIGN_POT(pan_size(FRAMEBUFFER), pan_alignment(ZS_CRC_EXTENSION)) +
++      pan_size(ZS_CRC_EXTENSION);
+ 
+    fbd_size = ALIGN_POT(fbd_size, pan_alignment(RENDER_TARGET)) +
+               (fb->rt_count * pan_size(RENDER_TARGET));
+@@ -407,6 +456,8 @@ panvk_per_arch(CmdPipelineBarrier2)(VkCommandBuffer commandBuffer,
+       panvk_per_arch(cmd_close_batch)(cmdbuf);
+       panvk_per_arch(cmd_open_batch)(cmdbuf);
+    }
++
++   panvk_per_arch(cmd_invalidate_barrier_crcs)(cmdbuf, pDependencyInfo);
+ }
+ 
+ static void
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+index 7df80b3..ac28d92 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -1197,9 +1197,11 @@ prepare_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_data *draw)
+ 
+    /* There are only 16 bits in the descriptor for the job ID. Each job has a
+     * pilot shader dealing with descriptor copies, and we need one
+-    * <vertex,tiler> pair per draw.
++    * <vertex,tiler> pair per draw. Closing the batch may add up to two CRC
++    * fill jobs per render target.
+     */
+-   if (batch->vtc_jc.job_index + (4 * cmdbuf->state.gfx.render.layer_count) >=
++   if (batch->vtc_jc.job_index + (4 * cmdbuf->state.gfx.render.layer_count) +
++          (2 * cmdbuf->state.gfx.render.fb.layout.rt_count) >=
+        UINT16_MAX) {
+       panvk_per_arch(cmd_close_batch)(cmdbuf);
+       batch = panvk_per_arch(cmd_open_batch)(cmdbuf);
+@@ -1894,6 +1896,30 @@ panvk_per_arch(CmdBeginRendering)(VkCommandBuffer commandBuffer,
+ 
+    if (!cmdbuf->cur_batch)
+       panvk_per_arch(cmd_open_batch)(cmdbuf);
++
++   if (resuming)
++      return;
++
++   /* A render pass can do a host-written image's first transition */
++   for (uint32_t i = 0; i < pRenderingInfo->colorAttachmentCount; i++) {
++      const VkRenderingAttachmentInfo *att =
++         &pRenderingInfo->pColorAttachments[i];
++      const VkRenderingAttachmentInitialLayoutInfoMESA *initial =
++         vk_find_struct_const(att->pNext,
++                              RENDERING_ATTACHMENT_INITIAL_LAYOUT_INFO_MESA);
++      VK_FROM_HANDLE(panvk_image_view, iview, att->imageView);
++
++      if (!initial ||
++          initial->initialLayout != VK_IMAGE_LAYOUT_PREINITIALIZED ||
++          !iview || iview->pview.first_level != 0)
++         continue;
++
++      struct panvk_image *image =
++         container_of(iview->vk.image, struct panvk_image, vk);
++
++      if (panvk_image_plane_crc_header_addr(image))
++         panvk_per_arch(cmd_invalidate_crc)(cmdbuf, &image->planes[0].plane);
++   }
+ }
+ 
+ VKAPI_ATTR void VKAPI_CALL
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_event.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_event.c
+index cc717cf..6d09602 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_event.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_event.c
+@@ -109,4 +109,7 @@ panvk_per_arch(CmdWaitEvents2)(VkCommandBuffer commandBuffer,
+ 
+       panvk_add_wait_event_operation(cmdbuf, event);
+    }
++
++   for (uint32_t i = 0; i < eventCount; i++)
++      panvk_per_arch(cmd_invalidate_barrier_crcs)(cmdbuf, &pDependencyInfos[i]);
+ }
+diff --git a/src/panfrost/vulkan/panvk_image.c b/src/panfrost/vulkan/panvk_image.c
+index 6dfc729..0ae1508 100644
+--- a/src/panfrost/vulkan/panvk_image.c
++++ b/src/panfrost/vulkan/panvk_image.c
+@@ -470,7 +470,7 @@ panvk_image_init_layouts(struct panvk_image *image,
+    const struct pan_mod_handler *mod_handler =
+       pan_mod_get_handler(arch, image->vk.drm_format_mod);
+    const bool should_checksum =
+-      arch >= 10 && panvk_should_checksum(image, pCreateInfo);
++      (arch == 7 || arch >= 10) && panvk_should_checksum(image, pCreateInfo);
+    image->crc_safe_external = should_checksum && wsi_info != NULL;
+ 
+    /* initialize pan_image props and mod_handler */
+diff --git a/src/panfrost/vulkan/panvk_image.h b/src/panfrost/vulkan/panvk_image.h
+index b2b5b51..c42baee 100644
+--- a/src/panfrost/vulkan/panvk_image.h
++++ b/src/panfrost/vulkan/panvk_image.h
+@@ -11,6 +11,7 @@
+ 
+ #include "vk_format.h"
+ #include "vk_image.h"
++#include "vk_util.h"
+ 
+ #include "pan_image.h"
+ 
+@@ -173,6 +174,32 @@ panvk_sparse_block_is_valid(struct panvk_sparse_block_desc desc) { return desc.s
+ 
+ VkSparseImageFormatProperties panvk_get_sparse_image_fmt_props(VkImageType type, VkFormat format);
+ 
++/* Whether CRCs of an image no longer describe its memory after a barrier */
++static inline bool
++panvk_image_barrier_invalidates_crc(const VkImageMemoryBarrier2 *barrier,
++                                    const struct panvk_image *image)
++{
++   if (barrier->oldLayout == VK_IMAGE_LAYOUT_PREINITIALIZED)
++      return true;
++
++   const bool external_acquire =
++      barrier->srcQueueFamilyIndex != barrier->dstQueueFamilyIndex &&
++      (barrier->srcQueueFamilyIndex == VK_QUEUE_FAMILY_EXTERNAL ||
++       barrier->srcQueueFamilyIndex == VK_QUEUE_FAMILY_FOREIGN_EXT);
++
++   if (!external_acquire)
++      return false;
++
++   if (image->crc_safe_external)
++      return false;
++
++   const VkExternalMemoryAcquireUnmodifiedEXT *unmodified =
++      vk_find_struct_const(barrier->pNext,
++                           EXTERNAL_MEMORY_ACQUIRE_UNMODIFIED_EXT);
++
++   return !unmodified || !unmodified->acquireUnmodifiedMemory;
++}
++
+ static inline uint64_t
+ panvk_image_plane_crc_header_addr(const struct panvk_image *image)
+ {
+diff --git a/src/panfrost/vulkan/panvk_vX_cmd_meta.c b/src/panfrost/vulkan/panvk_vX_cmd_meta.c
+index 34d7146..6fd294a 100644
+--- a/src/panfrost/vulkan/panvk_vX_cmd_meta.c
++++ b/src/panfrost/vulkan/panvk_vX_cmd_meta.c
+@@ -33,7 +33,6 @@ copy_to_image_use_gfx_pipeline(struct panvk_image *dst_img)
+    return false;
+ }
+ 
+-#if PAN_ARCH >= 10
+ /* Compute copies bypass framebuffer CRC tracking, so writes touching the
+  * mip-0 CRC region must invalidate its state explicitly.
+  */
+@@ -72,7 +71,6 @@ copy_image_touches_crc(const struct panvk_image *dst_img,
+ 
+    return false;
+ }
+-#endif /* PAN_ARCH >= 10 */
+ 
+ static void
+ meta_compute_start(struct panvk_cmd_buffer *cmdbuf,
+@@ -500,15 +498,17 @@ panvk_per_arch(CmdCopyMemoryToImageKHR)(
+       struct panvk_cmd_meta_compute_save_ctx save = {0};
+ 
+       meta_compute_start(cmdbuf, &save);
+-#if PAN_ARCH >= 10
+       if (copy_buffer_to_image_touches_crc(img, pCopyMemoryInfo)) {
++#if PAN_ARCH >= 10
+          struct cs_builder *b =
+             panvk_get_cs_builder(cmdbuf, PANVK_SUBQUEUE_COMPUTE);
+ 
+          panvk_per_arch(cmd_invalidate_crc)(
+             b, panvk_image_plane_crc_header_addr(img));
+-      }
++#else
++         panvk_per_arch(cmd_invalidate_crc)(cmdbuf, &img->planes[0].plane);
+ #endif
++      }
+       vk_meta_copy_memory_to_image(&cmdbuf->vk, &dev->meta,
+                                    pCopyMemoryInfo, &img_props,
+                                    VK_PIPELINE_BIND_POINT_COMPUTE);
+@@ -534,21 +534,12 @@ panvk_per_arch(CmdCopyImageToMemoryKHR)(
+    meta_compute_end(cmdbuf, &save);
+ }
+ 
+-VKAPI_ATTR void VKAPI_CALL
+-panvk_per_arch(CmdFillBuffer)(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
+-                              VkDeviceSize dstOffset, VkDeviceSize fillSize,
+-                              uint32_t data)
++static void
++cmd_fill_mem(struct panvk_cmd_buffer *cmdbuf, uint64_t addr, uint64_t range,
++             uint32_t data)
+ {
+-   VK_FROM_HANDLE(panvk_cmd_buffer, cmdbuf, commandBuffer);
+-   VK_FROM_HANDLE(panvk_buffer, buffer, dstBuffer);
+    struct panvk_physical_device *phys_dev =
+       to_panvk_physical_device(cmdbuf->vk.base.device->physical);
+-
+-   uint64_t addr = panvk_buffer_gpu_ptr(buffer, dstOffset);
+-   uint64_t range = panvk_buffer_range(buffer, dstOffset, fillSize) & ~3ULL;
+-   if (!range)
+-      return;
+-
+    const uint32_t max_wg = phys_dev->vk.properties.maxComputeWorkGroupCount[0];
+    struct panvk_precomp_ctx ctx = panvk_per_arch(precomp_cs)(cmdbuf);
+ 
+@@ -585,6 +576,37 @@ panvk_per_arch(CmdFillBuffer)(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
+    }
+ }
+ 
++VKAPI_ATTR void VKAPI_CALL
++panvk_per_arch(CmdFillBuffer)(VkCommandBuffer commandBuffer, VkBuffer dstBuffer,
++                              VkDeviceSize dstOffset, VkDeviceSize fillSize,
++                              uint32_t data)
++{
++   VK_FROM_HANDLE(panvk_cmd_buffer, cmdbuf, commandBuffer);
++   VK_FROM_HANDLE(panvk_buffer, buffer, dstBuffer);
++
++   uint64_t addr = panvk_buffer_gpu_ptr(buffer, dstOffset);
++   uint64_t range = panvk_buffer_range(buffer, dstOffset, fillSize) & ~3ULL;
++   if (!range)
++      return;
++
++   cmd_fill_mem(cmdbuf, addr, range, data);
++}
++
++#if PAN_ARCH < 10
++/* A zeroed CRC never matches a tile. The fill must not overlap earlier
++ * fragment jobs that may still write the table. */
++void
++panvk_per_arch(cmd_invalidate_crc)(struct panvk_cmd_buffer *cmdbuf,
++                                   const struct pan_image_plane *plane)
++{
++   const struct pan_image_slice_layout *slice = &plane->layout.slices[0];
++
++   cmd_fill_mem(cmdbuf, plane->base + slice->crc.offset_B, slice->crc.size_B,
++                0);
++   cmdbuf->cur_batch->serialize = true;
++}
++#endif
++
+ VKAPI_ATTR void VKAPI_CALL
+ panvk_per_arch(CmdUpdateBuffer)(VkCommandBuffer commandBuffer,
+                                 VkBuffer dstBuffer, VkDeviceSize dstOffset,
+@@ -704,15 +726,17 @@ panvk_per_arch(CmdCopyImage2)(VkCommandBuffer commandBuffer,
+       struct panvk_cmd_meta_compute_save_ctx save = {0};
+ 
+       meta_compute_start(cmdbuf, &save);
+-#if PAN_ARCH >= 10
+       if (copy_image_touches_crc(dst_img, pCopyImageInfo)) {
++#if PAN_ARCH >= 10
+          struct cs_builder *b =
+             panvk_get_cs_builder(cmdbuf, PANVK_SUBQUEUE_COMPUTE);
+ 
+          panvk_per_arch(cmd_invalidate_crc)(
+             b, panvk_image_plane_crc_header_addr(dst_img));
+-      }
++#else
++         panvk_per_arch(cmd_invalidate_crc)(cmdbuf, &dst_img->planes[0].plane);
+ #endif
++      }
+       vk_meta_copy_image(&cmdbuf->vk, &dev->meta, pCopyImageInfo,
+                          &src_img_props, &dst_img_props,
+                          VK_PIPELINE_BIND_POINT_COMPUTE);
+-- 
+2.55.0
+

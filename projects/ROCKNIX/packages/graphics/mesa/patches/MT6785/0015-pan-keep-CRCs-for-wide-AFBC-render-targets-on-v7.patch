@@ -1,0 +1,31 @@
+From 0676da42c09f2addb7c8cbf73813170dacdd180a Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Tue, 3 Nov 2026 23:32:38 -0800
+Subject: [PATCH 15/16] pan: keep CRCs for wide AFBC render targets on v7
+
+v7 keeps CRCs for 32x8 wide-block AFBC render targets with 16x16 tiles,
+as the blob does, so allow transaction elimination for them.
+---
+ src/panfrost/lib/pan_desc.c | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/src/panfrost/lib/pan_desc.c b/src/panfrost/lib/pan_desc.c
+index 2373056..1c35986 100644
+--- a/src/panfrost/lib/pan_desc.c
++++ b/src/panfrost/lib/pan_desc.c
+@@ -118,8 +118,10 @@ GENX(pan_image_view_can_crc)(const struct pan_image_view *view,
+    /* Only sparse AFBC can be render targets. */
+    assert(mod & AFBC_FORMAT_MOD_SPARSE);
+ 
+-   /* AFBC render block size must fit in a single pass. */
+-   if (pan_afbc_superblock_exceeds_tile_size(mod, tile_size_px))
++   /* AFBC render block size must fit in a single pass. v7 also keeps CRCs
++    * for wide superblocks spanning two tiles. */
++   if (PAN_ARCH != 7 &&
++       pan_afbc_superblock_exceeds_tile_size(mod, tile_size_px))
+       return false;
+ 
+    return true;
+-- 
+2.55.0
+
