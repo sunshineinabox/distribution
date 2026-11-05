@@ -1,0 +1,145 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Wed, 4 Nov 2026 20:56:16 -0800
+Subject: [PATCH] pan/bi: fold F16_TO_F32 into widened FADD/FMA sources
+
+---
+ .../compiler/bifrost/bi_opt_mod_props.c       | 99 +++++++++++++++++++
+ .../compiler/bifrost/bifrost_compile.c        |  1 +
+ src/panfrost/compiler/bifrost/compiler.h      |  1 +
+ 3 files changed, 101 insertions(+)
+
+diff --git a/src/panfrost/compiler/bifrost/bi_opt_mod_props.c b/src/panfrost/compiler/bifrost/bi_opt_mod_props.c
+index 01a6266..df73264 100644
+--- a/src/panfrost/compiler/bifrost/bi_opt_mod_props.c
++++ b/src/panfrost/compiler/bifrost/bi_opt_mod_props.c
+@@ -575,3 +575,102 @@ bi_lower_opt_instructions(bi_context *ctx)
+          bi_remove_instruction(I);
+    }
+ }
++
++static bool
++bi_takes_widen(unsigned arch, bi_instr *I, unsigned s, enum bi_swizzle swz)
++{
++   if (I->src[s].swizzle != BI_SWIZZLE_H01 ||
++       !bi_op_supports_swizzle(I->op, s, swz, arch))
++      return false;
++
++   switch (I->op) {
++   case BI_OPCODE_FMA_F32:
++      return true;
++   case BI_OPCODE_FADD_F32: {
++      /* Stay eligible for +FADD.f32, see bi_impacted_fadd_widens */
++      enum bi_swizzle other = I->src[1 - s].swizzle;
++
++      return other == BI_SWIZZLE_H01 ||
++             (other == BI_SWIZZLE_H00 && swz == BI_SWIZZLE_H00);
++   }
++   default:
++      /* +FCMP.f32 lacks most widens and FCMP is often on the ADD unit */
++      return false;
++   }
++}
++
++/* Fold F16_TO_F32 into widened FADD/FMA sources and redo it next to uses in
++ * other blocks, so 16-bit values stay packed two per register */
++void
++bi_opt_widen_f16(bi_context *ctx)
++{
++   if (ctx->arch >= 9)
++      return;
++
++   unsigned n = ctx->ssa_alloc;
++   bi_instr **cvt_of = calloc(n, sizeof(*cvt_of));
++   bi_block **cvt_block = calloc(n, sizeof(*cvt_block));
++   bi_block **clone_block = calloc(n, sizeof(*clone_block));
++   bi_index *clone = calloc(n, sizeof(*clone));
++
++   bi_foreach_block(ctx, block) {
++      bi_foreach_instr_in_block(block, I) {
++         if (I->op == BI_OPCODE_F16_TO_F32 && !I->ftz &&
++             bi_is_ssa(I->src[0]) &&
++             (I->src[0].swizzle == BI_SWIZZLE_H00 ||
++              I->src[0].swizzle == BI_SWIZZLE_H11)) {
++            cvt_of[I->dest[0].value] = I;
++            cvt_block[I->dest[0].value] = block;
++         }
++      }
++   }
++
++   bi_foreach_block(ctx, block) {
++      bi_foreach_instr_in_block_safe(block, I) {
++         bi_foreach_ssa_src(I, s) {
++            unsigned v = I->src[s].value;
++            bi_instr *cvt = v < n ? cvt_of[v] : NULL;
++
++            if (!cvt)
++               continue;
++
++            if (bi_takes_widen(ctx->arch, I, s, cvt->src[0].swizzle)) {
++               bi_index src = cvt->src[0];
++               src.abs = I->src[s].abs;
++               src.neg = I->src[s].neg;
++               I->src[s] = src;
++               continue;
++            }
++
++            bool phi = I->op == BI_OPCODE_PHI;
++            bi_block *at =
++               phi ? *util_dynarray_element(&block->predecessors, bi_block *, s)
++                   : block;
++
++            if (at == cvt_block[v])
++               continue;
++
++            if (clone_block[v] != at) {
++               bi_builder b = bi_init_builder(
++                  ctx, phi ? bi_after_block_logical(at) : bi_before_instr(I));
++               bi_index d = bi_f16_to_f32(&b, cvt->src[0]);
++
++               /* A copy at the end of a predecessor can't serve earlier uses
++                * in that block */
++               if (!phi) {
++                  clone_block[v] = at;
++                  clone[v] = d;
++               }
++               bi_replace_src(I, s, d);
++            } else {
++               bi_replace_src(I, s, clone[v]);
++            }
++         }
++      }
++   }
++
++   free(cvt_of);
++   free(cvt_block);
++   free(clone_block);
++   free(clone);
++}
+diff --git a/src/panfrost/compiler/bifrost/bifrost_compile.c b/src/panfrost/compiler/bifrost/bifrost_compile.c
+index 1ebd9ef..e5e5346 100644
+--- a/src/panfrost/compiler/bifrost/bifrost_compile.c
++++ b/src/panfrost/compiler/bifrost/bifrost_compile.c
+@@ -4356,6 +4356,7 @@ bi_compile_variant_nir(nir_shader *nir,
+ 
+       bi_opt_dce(ctx, false);
+       bi_opt_cse(ctx);
++      bi_opt_widen_f16(ctx);
+       bi_opt_dce(ctx, false);
+       if (ctx->inputs->fau.pushable_ubos)
+          bi_opt_reorder_push(ctx);
+diff --git a/src/panfrost/compiler/bifrost/compiler.h b/src/panfrost/compiler/bifrost/compiler.h
+index 0c82ece..b2d5eec 100644
+--- a/src/panfrost/compiler/bifrost/compiler.h
++++ b/src/panfrost/compiler/bifrost/compiler.h
+@@ -1659,6 +1659,7 @@ void bi_opt_dce(bi_context *ctx, bool partial);
+ void bi_opt_cse(bi_context *ctx);
+ void bi_opt_mod_prop_forward(bi_context *ctx);
+ void bi_opt_mod_prop_backward(bi_context *ctx);
++void bi_opt_widen_f16(bi_context *ctx);
+ void bi_opt_fuse_dual_texture(bi_context *ctx);
+ void bi_opt_dce_post_ra(bi_context *ctx);
+ void bi_opt_message_preload(bi_context *ctx);
+-- 
+2.55.0
+
