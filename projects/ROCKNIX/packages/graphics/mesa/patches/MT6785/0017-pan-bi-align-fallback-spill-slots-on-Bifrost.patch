@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Wed, 4 Nov 2026 20:38:55 -0800
+Subject: [PATCH] pan/bi: align fallback spill slots on Bifrost
+
+---
+ src/panfrost/compiler/bifrost/bi_ra.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/panfrost/compiler/bifrost/bi_ra.c b/src/panfrost/compiler/bifrost/bi_ra.c
+index abcc2f8..b82fc26 100644
+--- a/src/panfrost/compiler/bifrost/bi_ra.c
++++ b/src/panfrost/compiler/bifrost/bi_ra.c
+@@ -791,7 +791,8 @@ bi_spill_register(bi_context *ctx, bi_index index, uint32_t offset,
+    assert(index.value < ctx->ssa_alloc);
+    unsigned channels = ctx->reg_alignment[index.value] / 4;
+    assert(channels > 0);
+-   unsigned alignment = (ctx->arch >= 9) ? ctx->reg_alignment[index.value] : 4;
++   /* Bifrost also needs 64/128-bit TLS accesses naturally aligned */
++   unsigned alignment = ctx->reg_alignment[index.value];
+ 
+    /* first figure out the alignment we will need, based on the
+     * maximum count we see
+-- 
+2.55.0
+
