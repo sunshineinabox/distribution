@@ -36,7 +36,12 @@ while true; do
       ;;
       *)
         log $0 "Switching to performance mode."
-        gpu_performance_level auto
+        # A running game keeps the GPU level it set
+        if [ -e "/tmp/.gpu_performance_level" ]; then
+          gpu_performance_level $(cat /tmp/.gpu_performance_level)
+        else
+          gpu_performance_level auto
+        fi
         if [ "${DEVICE_LED_CHARGING}" = "true" ]; then
           ledcontrol charging
         fi

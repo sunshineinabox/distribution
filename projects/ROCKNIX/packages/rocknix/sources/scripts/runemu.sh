@@ -395,7 +395,7 @@ if [ ! -z ${GPUPERF} ]
 then
   ${VERBOSE} && log $0 "Set GPU performance to (${GPUPERF})"
   gpu_performance_level ${GPUPERF}
-  get_gpu_performance_level >/tmp/.gpu_performance_level
+  echo "${GPUPERF}" >/tmp/.gpu_performance_level
 fi
 
 if [ "${DEVICE_HAS_FAN}" = "true" ]
