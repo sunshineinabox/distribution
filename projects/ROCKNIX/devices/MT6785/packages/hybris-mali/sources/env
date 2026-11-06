@@ -2,12 +2,10 @@
 # Copyright (C) 2026-present ROCKNIX (https://github.com/ROCKNIX)
 
 # Environment for GL apps on the stock Mali blob through libhybris.
-# The blob writes bionic's GL TLS slots at tp+16..tp+80, which the pad takes as
-# the first preloaded TLS block; libhybris-common must also be in the initial
-# static TLS for its stock libc thread-slot patches.
+# The blob's bionic TLS accesses are patched into libhybris-common, which must be in static TLS.
 export LD_PRELOAD="/usr/lib/hybris-mali/libhybris-tls-pad.so:/usr/lib/libhybris/libhybris-common.so.1${LD_PRELOAD:+:${LD_PRELOAD}}"
 export GLIBC_TUNABLES="glibc.rtld.optional_static_tls=16384${GLIBC_TUNABLES:+:${GLIBC_TUNABLES}}"
-export HYBRIS_PATCH_TLS="libc.so"
+export HYBRIS_PATCH_TLS="libc.so:libGLES_mali.so"
 # Pick the [vendor] section of /linkerconfig/ld.config.txt
 export HYBRIS_USE_VENDOR_NAMESPACE="1"
 export LIBEGL="/vendor/lib64/egl/libGLES_mali.so"

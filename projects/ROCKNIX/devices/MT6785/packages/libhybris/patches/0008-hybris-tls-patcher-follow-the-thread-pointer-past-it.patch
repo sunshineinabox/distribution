@@ -1,0 +1,74 @@
+From 361ec4b17ea26b325ec491c4eac901c982f4b155 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Fri, 6 Nov 2026 08:23:11 -0800
+Subject: [PATCH] hybris: tls patcher: follow the thread pointer past its first
+ access
+
+The Mali blob reloads its GL context through the register holding
+TPIDR_EL0 after the first access. Keep rewriting slot accesses until that
+register is overwritten.
+---
+ hybris/common/tls_patcher_aarch64.c | 38 +++++++++++++++++++++++------
+ 1 file changed, 30 insertions(+), 8 deletions(-)
+
+diff --git a/hybris/common/tls_patcher_aarch64.c b/hybris/common/tls_patcher_aarch64.c
+index 66f4c2d..735c96a 100644
+--- a/hybris/common/tls_patcher_aarch64.c
++++ b/hybris/common/tls_patcher_aarch64.c
+@@ -75,6 +75,25 @@ static int is_store(uint32_t inst) {
+            (inst & 0xFFC00000) == 0xA8800000 || (inst & 0xFFC00000) == 0xB9000000;
+ }
+ 
++/* Whether inst may write X<reg>, including load pair Rt2 and base writeback */
++static int clobbers(uint32_t inst, uint32_t reg) {
++    uint32_t rt = inst & 0x1F, rn = (inst >> 5) & 0x1F, rt2 = (inst >> 10) & 0x1F;
++
++    if ((inst & 0x38000000) == 0x28000000) {
++        if ((inst & 0x00800000) && rn == reg) {
++            return 1;
++        }
++        if (!(inst & 0x00400000) || (inst & 0x04000000)) {
++            return 0;
++        }
++        return rt == reg || rt2 == reg;
++    }
++    if ((inst & 0x3B200400) == 0x38000400 && rn == reg) {
++        return 1;
++    }
++    return !is_store(inst) && rt == reg;
++}
++
+ static void patch_bionic_thread_slots(uint32_t* text, size_t count) {
+     static int error_reported = 0;
+     intptr_t offset = (intptr_t)&bionic_thread_stub - (intptr_t)__builtin_thread_pointer();
+@@ -154,16 +173,19 @@ void hybris_patch_tls_arch(void* segment_addr, size_t segment_size, int tls_offs
+             continue;
+         }
+ 
+-        /* Found MRS X<rt>, TPIDR_EL0, scan next few instructions for matching LDR */
+-        for (int j = 1; j < 5 && (i + j) < count; j++) {
+-            struct ldr_inst* ldr = (struct ldr_inst*)&text[i + j];
++        /* The Mali blob reuses X<rt> for later GL slot accesses */
++        for (size_t j = i + 1; j < i + 33 && j < count; j++) {
++            struct ldr_inst* ldr = (struct ldr_inst*)&text[j];
+ 
+-            /* Check for LDR or STR instruction using the same register as MRS */
++            if (is_unconditional_branch(text[j])) {
++                break;
++            }
+             if ((ldr->opcode == LDR_OPCODE || ldr->opcode == STR_OPCODE)
+-                 && ldr->size == 0b11 && ldr->rn == mrs->rt) {
+-                if (ldr->imm12 > TLS_SLOT_APP && ldr->imm12 < TLS_SLOT_STACK_GUARD) {
+-                    ldr->imm12 += tls_offset;
+-                }
++                 && ldr->size == 0b11 && ldr->rn == mrs->rt
++                 && ldr->imm12 > TLS_SLOT_APP && ldr->imm12 < TLS_SLOT_STACK_GUARD) {
++                ldr->imm12 += tls_offset;
++            }
++            if (clobbers(text[j], mrs->rt)) {
+                 break;
+             }
+         }
+-- 
+2.56.0
+
