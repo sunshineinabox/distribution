@@ -1,0 +1,101 @@
+From d135c3afa247b8b08838f9d6709211c4c9d97650 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Fri, 6 Nov 2026 08:59:08 -0800
+Subject: [PATCH] panvk/jm: spread the index min/max search over the workgroup
+
+Interleave the workgroup over its index range so a short draw is not
+searched by a single thread, and size direct draws by indexCount instead
+of the whole index buffer.
+---
+ src/panfrost/libpan/draw_helper.cl         | 21 ++++++++++-----------
+ src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c |  5 ++++-
+ src/panfrost/vulkan/panvk_cmd_draw.h       |  2 ++
+ 3 files changed, 16 insertions(+), 12 deletions(-)
+
+diff --git a/src/panfrost/libpan/draw_helper.cl b/src/panfrost/libpan/draw_helper.cl
+index 0c18596..2012fec 100644
+--- a/src/panfrost/libpan/draw_helper.cl
++++ b/src/panfrost/libpan/draw_helper.cl
+@@ -585,24 +585,23 @@ panlib_draw_index_minmax_search_helper(global uint8_t *index_buffer_ptr,
+                                        uint32_t index_bytes_log2__3,
+                                        uint8_t primitive_restart__2)
+ {
+-   /* Max count of values to process per thread */
+-   const uint32_t max_count_per_thread = 1024;
++   /* Each workgroup covers 1024 values per thread, interleaved by thread */
++   const uint32_t group_count = cl_local_size.x * 1024;
+ 
+    const uint32_t index_bit_size = (1 << index_bytes_log2__3) * 8;
+    const uint32_t start = cmd->firstIndex;
+    const uint32_t index_count = cmd->indexCount;
+ 
+-   uint32_t base_idx = cl_global_id.x * max_count_per_thread;
++   uint32_t group_base = cl_group_id.x * group_count;
++   uint32_t first = group_base + cl_local_id.x;
+ 
+    /* If the thread is out of range, bail out */
+-   if (base_idx >= index_count)
++   if (first >= index_count)
+       return;
+ 
+-   /* Compute expected max iteration to do in this thread */
+-   uint32_t count = MIN2(max_count_per_thread, index_count - base_idx);
+-
+-   /* Sanity check so nothing weird will happen */
+-   assert(base_idx + count <= index_count);
++   uint32_t end = index_count - group_base > group_count
++                     ? group_base + group_count
++                     : index_count;
+ 
+    uint32_t local_min = ((uint64_t)1 << index_bit_size) - 1;
+    uint32_t local_max = 0;
+@@ -611,8 +610,8 @@ panlib_draw_index_minmax_search_helper(global uint8_t *index_buffer_ptr,
+ #define MINMAX_SEARCH_CASE(sz)                                                 \
+    case sz: {                                                                  \
+       global uint##sz##_t *indices = (global uint##sz##_t *)index_buffer_ptr;  \
+-      for (uint32_t i = 0; i < count; i++) {                                   \
+-         uint32_t val = (uint32_t)indices[start + base_idx + i];               \
++      for (uint32_t i = first; i < end; i += cl_local_size.x) {               \
++         uint32_t val = (uint32_t)indices[start + i];                          \
+          if (primitive_restart__2 && val == UINT##sz##_MAX)                    \
+             continue;                                                          \
+          local_min = min(local_min, val);                                      \
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+index ac28d92..31035f5 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -1569,7 +1569,9 @@ panvk_cmd_draw_indirect(struct panvk_cmd_buffer *cmdbuf,
+       util_dynarray_append(&batch->jobs, write_job.cpu);
+ 
+       const uint32_t index_count =
+-         draw->info.index.buffer_size / draw->info.index.index_size;
++         draw->info.index.count
++            ? draw->info.index.count
++            : draw->info.index.buffer_size / draw->info.index.index_size;
+       uint32_t wg_count = DIV_ROUND_UP(index_count, 65536);
+       assert(wg_count <= 65536);
+ 
+@@ -1807,6 +1809,7 @@ panvk_per_arch(CmdDrawIndexed)(VkCommandBuffer commandBuffer,
+          .prim = panvk_get_client_prim(cmdbuf),
+       },
+    };
++   draw.info.index.count = indexCount;
+ 
+    panvk_cmd_draw_indirect(cmdbuf, &draw);
+ }
+diff --git a/src/panfrost/vulkan/panvk_cmd_draw.h b/src/panfrost/vulkan/panvk_cmd_draw.h
+index 735d1e7..cc36b08 100644
+--- a/src/panfrost/vulkan/panvk_cmd_draw.h
++++ b/src/panfrost/vulkan/panvk_cmd_draw.h
+@@ -419,6 +419,8 @@ struct panvk_draw_info {
+       uint64_t buffer_size;
+       uint32_t index_size;
+       uint32_t offset;
++      /* Index count of a direct draw, 0 when only the GPU knows it */
++      uint32_t count;
+       bool restart_enable;
+    } index;
+ 
+-- 
+2.56.0
+
