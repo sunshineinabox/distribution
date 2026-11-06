@@ -1009,6 +1009,17 @@
 			compatible = "mediatek,mt6358-rtc";
 		};
 
+		/* stock 5 mOhm sense resistor */
+		fuel-gauge {
+			compatible = "mediatek,mt6359-fuel-gauge";
+			monitored-battery = <&battery>;
+			power-supplies = <&mt6360_charger>;
+			io-channels = <&mt6360_adc 4>;
+			io-channel-names = "vbat";
+			mediatek,battery-thermal-zone = "battery-thermal";
+			mediatek,sense-resistor-micro-ohms = <5000>;
+		};
+
 		/* only rails with a consumer, the rest stay undescribed so the kernel leaves them alone */
 		regulators {
 			/* CPU rails span the mt6785.dtsi OPPs, vsram tracks vproc + 100 mV as stock */
@@ -1810,7 +1821,7 @@
 		};
 
 		/* stock charger settings */
-		charger {
+		mt6360_charger: charger {
 			compatible = "mediatek,mt6360-chg";
 			/* no Pump Express on mainline: 5 V adapters only */
 			richtek,vinovp-microvolt = <6500000>;
@@ -1818,8 +1829,7 @@
 			/* Type-C/PD current from TCPM; stock sinks 5 V 2.6 A */
 			power-supplies = <&mt6360_tcpc>;
 			mediatek,input-current-max-microamp = <2600000>;
-			io-channels = <&mt6360_adc 4>, <&mt6360_adc 6>;
-			io-channel-names = "vbat", "ibat";
+			/* the battery supply is the MT6359 fuel gauge's */
 			mediatek,battery-thermal-zone = "battery-thermal";
 			mediatek,input-voltage-limit-microvolt = <4400000>;
 			mediatek,safety-timer-hours = <12>;
