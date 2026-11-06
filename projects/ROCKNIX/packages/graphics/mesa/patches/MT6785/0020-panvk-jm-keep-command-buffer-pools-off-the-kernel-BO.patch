@@ -1,0 +1,57 @@
+From 679e170a288e909978e0792080d65f58d9f90c33 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Fri, 6 Nov 2026 09:19:46 -0800
+Subject: [PATCH] panvk/jm: keep command buffer pools off the kernel BO lists
+
+Listing the private command buffer pools on every batch makes implicit
+fencing order each vertex/tiler job after the previous fragment job. Only
+list the blit BOs, tiler heaps and attachments.
+---
+ src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c | 19 ++++---------------
+ 1 file changed, 4 insertions(+), 15 deletions(-)
+
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+index 166c411..870ef57 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+@@ -292,25 +292,14 @@ panvk_per_arch(gpu_queue_submit)(struct vk_queue *vk_queue, struct vk_queue_subm
+                                 ARRAY_SIZE(dev->tiler_heaps);
+          }
+ 
+-         /* FIXME: should be done at the batch level */
+-         unsigned nr_vtc_bos = panvk_pool_num_bos(&cmdbuf->desc_pool) +
+-                               panvk_pool_num_bos(&cmdbuf->varying_pool) +
+-                               panvk_pool_num_bos(&cmdbuf->tls_pool) +
+-                               (batch->blit.src ? 1 : 0) +
++         /* The command buffer pools are private, so keep them off the BO
++          * lists where implicit fencing would serialize the batches */
++         unsigned nr_vtc_bos = (batch->blit.src ? 1 : 0) +
+                                (batch->blit.dst ? 1 : 0) + (heap ? 1 : 0);
+          unsigned nr_frag_bos = nr_vtc_bos + batch->fb.bo_count + 1;
+          unsigned bo_idx = 0;
+          uint32_t bos[nr_frag_bos];
+ 
+-         panvk_pool_get_bo_handles(&cmdbuf->desc_pool, &bos[bo_idx]);
+-         bo_idx += panvk_pool_num_bos(&cmdbuf->desc_pool);
+-
+-         panvk_pool_get_bo_handles(&cmdbuf->varying_pool, &bos[bo_idx]);
+-         bo_idx += panvk_pool_num_bos(&cmdbuf->varying_pool);
+-
+-         panvk_pool_get_bo_handles(&cmdbuf->tls_pool, &bos[bo_idx]);
+-         bo_idx += panvk_pool_num_bos(&cmdbuf->tls_pool);
+-
+          if (batch->blit.src)
+             bos[bo_idx++] = pan_kmod_bo_handle(batch->blit.src);
+ 
+@@ -322,7 +311,7 @@ panvk_per_arch(gpu_queue_submit)(struct vk_queue *vk_queue, struct vk_queue_subm
+ 
+          /* Only fragment jobs use the attachments and sample positions, so
+           * implicit fencing on them need not hold back vertex/tiler jobs */
+-         uint32_t vtc_bos[nr_vtc_bos];
++         uint32_t vtc_bos[MAX2(nr_vtc_bos, 1)];
+          memcpy(vtc_bos, bos, nr_vtc_bos * sizeof(*bos));
+ 
+          for (unsigned i = 0; i < batch->fb.bo_count; i++)
+-- 
+2.56.0
+
