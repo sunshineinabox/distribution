@@ -1,0 +1,44 @@
+From acb415f0758909b5c3506bec3b0dce6619ed62ae Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Fri, 6 Nov 2026 09:38:13 -0800
+Subject: [PATCH] panvk/jm: only serialize the batch that resets the poly heap
+
+Only the batch that resets the device-wide poly heap, and batches of
+secondaries, need to wait for earlier work. Later batches allocate above
+what earlier ones still read.
+---
+ src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c | 11 +++++++----
+ 1 file changed, 7 insertions(+), 4 deletions(-)
+
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+index 5a5f9d2..e49ecd5 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -384,17 +384,20 @@ panvk_per_arch(cmd_init_poly_heap)(struct panvk_cmd_buffer *cmdbuf,
+    struct panvk_device *dev = to_panvk_device(cmdbuf->vk.base.device);
+    struct panvk_batch *batch = cmdbuf->cur_batch;
+ 
+-   /* poly_heap is shared by every batch on the device */
+-   batch->serialize = true;
+-
+    /* The first time poly_heap is used in a primary command buffer, we need to
+-    * reset the heap bottom position. */
++    * reset the heap bottom position. Only that batch and secondaries wait for
++    * earlier work. */
+    if (cmdbuf->state.uses_poly_heap ||
+        cmdbuf->vk.level == VK_COMMAND_BUFFER_LEVEL_SECONDARY) {
++      if (cmdbuf->vk.level == VK_COMMAND_BUFFER_LEVEL_SECONDARY)
++         batch->serialize = true;
+       *job_id = 0;
+       return VK_SUCCESS;
+    }
+ 
++   /* poly_heap is shared by every batch on the device */
++   batch->serialize = true;
++
+    struct pan_ptr job =
+       pan_pool_alloc_desc(&cmdbuf->desc_pool.base, WRITE_VALUE_JOB);
+    if (!job.gpu)
+-- 
+2.56.0
+
