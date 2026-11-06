@@ -2,13 +2,10 @@ From: sunshineinabox <aqemail@gmail.com>
 Date: Fri, 6 Nov 2026 06:30:00 +0000
 Subject: [PATCH] power: supply: add the MT6359 fuel gauge
 
-The MT6359 FGADC measures the battery current and integrates it in a
-coulomb counter, but mainline has no driver for it. Read both with the
-latch sequence of MediaTek's gauge driver and register the battery
-supply: current in both directions, and the charge counted from an OCV
-anchor taken at probe. The anchor moves to full when the charger gets
-there, to the OCV after 30 minutes at rest, and to the OCV near empty;
-a battery drained by a load above the input current reports discharging.
+Add a driver for the MT6359 FGADC that reads the battery current and
+coulomb counter with the latch sequence of MediaTek's gauge driver.
+Capacity is counted from an OCV anchor, retaken at full, after 30
+minutes at rest and near empty.
 ---
 diff -ruN a/drivers/mfd/mt6397-core.c b/drivers/mfd/mt6397-core.c
 --- a/drivers/mfd/mt6397-core.c	2026-11-05 22:00:01
@@ -56,7 +53,7 @@ diff -ruN a/drivers/power/supply/Makefile b/drivers/power/supply/Makefile
 diff -ruN a/drivers/power/supply/mt6359_fuel_gauge.c b/drivers/power/supply/mt6359_fuel_gauge.c
 --- a/drivers/power/supply/mt6359_fuel_gauge.c	1969-12-31 16:00:00
 +++ b/drivers/power/supply/mt6359_fuel_gauge.c	2026-11-05 23:11:55
-@@ -0,0 +1,481 @@
+@@ -0,0 +1,510 @@
 +// SPDX-License-Identifier: GPL-2.0
 +/*
 + * MediaTek MT6359 PMIC fuel gauge
@@ -66,6 +63,7 @@ diff -ruN a/drivers/power/supply/mt6359_fuel_gauge.c b/drivers/power/supply/mt63
 +
 +#include <linux/devm-helpers.h>
 +#include <linux/iio/consumer.h>
++#include <linux/ktime.h>
 +#include <linux/math64.h>
 +#include <linux/mod_devicetable.h>
 +#include <linux/module.h>
@@ -121,6 +119,10 @@ diff -ruN a/drivers/power/supply/mt6359_fuel_gauge.c b/drivers/power/supply/mt63
 +	int status;
 +	int temp;
 +	int cap;
++	/* Net current over the last poll, from the counter */
++	int avg_ua;
++	s64 avg_car;
++	ktime_t avg_time;
 +};
 +
 +static int mt6359_fg_read(struct mt6359_fg *fg, int *ua, s64 *car)
@@ -233,10 +235,28 @@ diff -ruN a/drivers/power/supply/mt6359_fuel_gauge.c b/drivers/power/supply/mt63
 +	return POWER_SUPPLY_STATUS_NOT_CHARGING;
 +}
 +
++static void mt6359_fg_update_avg(struct mt6359_fg *fg, s64 car)
++{
++	ktime_t now = ktime_get_boottime();
++	s64 ms = ktime_ms_delta(now, fg->avg_time);
++
++	/* A window starts at probe and when the supply changes */
++	if (!fg->avg_time)
++		fg->avg_ua = 0;
++	else if (ms >= MSEC_PER_SEC)
++		fg->avg_ua = div64_s64(mt6359_fg_car_to_uah(fg, car - fg->avg_car) *
++				       3600 * MSEC_PER_SEC, ms);
++	else
++		return;
++
++	fg->avg_car = car;
++	fg->avg_time = now;
++}
++
 +static int mt6359_fg_status(struct mt6359_fg *fg, int ua)
 +{
-+	/* A load above the input current drains the battery whatever the charger says */
-+	if (ua < -MT6359_FG_REST_UA)
++	/* A load above the input current drains the battery even while charging */
++	if (fg->avg_ua < -MT6359_FG_REST_UA)
 +		return POWER_SUPPLY_STATUS_DISCHARGING;
 +
 +	return mt6359_fg_charger_status(fg, ua);
@@ -273,6 +293,8 @@ diff -ruN a/drivers/power/supply/mt6359_fuel_gauge.c b/drivers/power/supply/mt63
 +	mutex_lock(&fg->lock);
 +	if (mt6359_fg_read(fg, &ua, &car))
 +		goto unlock;
++
++	mt6359_fg_update_avg(fg, car);
 +
 +	/* Re-anchor when the count runs past full or empty */
 +	uah = mt6359_fg_counted_uah(fg, car);
@@ -413,8 +435,12 @@ diff -ruN a/drivers/power/supply/mt6359_fuel_gauge.c b/drivers/power/supply/mt63
 +	struct mt6359_fg *fg = power_supply_get_drvdata(psy);
 +
 +	/* Plugged or unplugged: update status and capacity now */
-+	if (fg->info)
++	if (fg->info) {
++		mutex_lock(&fg->lock);
++		fg->avg_time = 0;
++		mutex_unlock(&fg->lock);
 +		mod_delayed_work(system_freezable_wq, &fg->work, 0);
++	}
 +}
 +
 +static const struct power_supply_desc mt6359_fg_desc = {
