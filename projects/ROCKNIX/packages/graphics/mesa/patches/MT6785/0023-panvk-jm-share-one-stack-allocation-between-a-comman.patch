@@ -1,0 +1,71 @@
+From 4515ae7c65cb8a9e616f27fbf311a6c2df7eb1ad Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Fri, 6 Nov 2026 12:27:33 -0800
+Subject: [PATCH] panvk/jm: share one stack allocation between a command
+ buffer's batches
+
+Each batch with spilling shaders allocates a full stack for every hardware
+thread, so thousands of render passes can hold gigabytes. Share one
+allocation between batches and grow it when a batch needs more per thread.
+---
+ src/panfrost/vulkan/jm/panvk_cmd_buffer.h    |  5 ++++
+ src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c | 26 +++++++++++++-------
+ 2 files changed, 22 insertions(+), 9 deletions(-)
+
+diff --git a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+index e7f810c..4acbabe 100644
+--- a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
++++ b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+@@ -114,6 +114,11 @@ struct panvk_cmd_buffer {
+       bool serialize_next_batch;
+       /* A transfer barrier asked the next compute job to do the same */
+       bool serialize_next_compute;
++      /* Stack memory the batches share, and its size per thread */
++      struct {
++         uint64_t ptr;
++         uint32_t size;
++      } tls;
+    } state;
+ };
+ 
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+index 0ff5147..95b40bc 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -160,16 +160,24 @@ panvk_per_arch(cmd_close_batch)(struct panvk_cmd_buffer *cmdbuf)
+       invalidate_unselected_crc_rts(cmdbuf);
+    }
+ 
++   /* Stacks are indexed by core and hardware thread, so batches can share one
++    * allocation as long as they use the same size per thread */
+    if (batch->tlsinfo.tls.size) {
+-      unsigned thread_tls_alloc =
+-         pan_query_thread_tls_alloc(&phys_dev->kmod.dev->props);
+-      unsigned core_id_range =
+-         pan_query_core_id_range(&phys_dev->kmod.dev->props);
+-
+-      unsigned size = pan_get_total_stack_size(batch->tlsinfo.tls.size,
+-                                               thread_tls_alloc, core_id_range);
+-      batch->tlsinfo.tls.ptr =
+-         panvk_cmd_alloc_dev_mem(cmdbuf, tls, size, 4096).gpu;
++      if (batch->tlsinfo.tls.size > cmdbuf->state.tls.size) {
++         unsigned thread_tls_alloc =
++            pan_query_thread_tls_alloc(&phys_dev->kmod.dev->props);
++         unsigned core_id_range =
++            pan_query_core_id_range(&phys_dev->kmod.dev->props);
++         unsigned size = pan_get_total_stack_size(
++            batch->tlsinfo.tls.size, thread_tls_alloc, core_id_range);
++
++         cmdbuf->state.tls.ptr =
++            panvk_cmd_alloc_dev_mem(cmdbuf, tls, size, 4096).gpu;
++         cmdbuf->state.tls.size = batch->tlsinfo.tls.size;
++      }
++
++      batch->tlsinfo.tls.size = cmdbuf->state.tls.size;
++      batch->tlsinfo.tls.ptr = cmdbuf->state.tls.ptr;
+    }
+ 
+    if (batch->tlsinfo.wls.size) {
+-- 
+2.56.0
+
