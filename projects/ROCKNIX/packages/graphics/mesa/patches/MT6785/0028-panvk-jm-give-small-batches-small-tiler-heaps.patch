@@ -1,0 +1,303 @@
+From af5fbf43a990e52f01931a1b9d466e03c5a52874 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Fri, 6 Nov 2026 22:43:51 -0800
+Subject: [PATCH] panvk/jm: give small batches small tiler heaps
+
+Batches drawing at most 32K vertices into one layer of up to 1080p take
+one of 32 16 MiB tiler heaps, so up to 16 of them can join one
+submission. Other batches keep the big heaps and their limit.
+---
+ src/panfrost/vulkan/jm/panvk_cmd_buffer.h    | 12 +++++++++
+ src/panfrost/vulkan/jm/panvk_queue.h         |  5 ++--
+ src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c | 27 +++++++++++++++-----
+ src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c   | 21 +++++++++++++++
+ src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c  | 17 ++++++++++--
+ src/panfrost/vulkan/panvk_device.h           |  3 +++
+ src/panfrost/vulkan/panvk_vX_device.c        | 13 ++++++++++
+ 7 files changed, 88 insertions(+), 10 deletions(-)
+
+diff --git a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+index 4df70e4..f71d4fc 100644
+--- a/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
++++ b/src/panfrost/vulkan/jm/panvk_cmd_buffer.h
+@@ -56,6 +56,13 @@ struct panvk_batch {
+       struct pan_ptr heap_desc;
+       struct pan_ptr ctx_descs;
+       struct mali_tiler_context_packed ctx_templ;
++
++      /* Vertices or indices the batch draws, UINT64_MAX if unknown */
++      uint64_t vertex_count;
++      /* A single layer no bigger than PANVK_SMALL_HEAP_MAX_PIXELS */
++      bool small_fb;
++      /* Takes one of the small tiler heaps at submission */
++      bool small_heap;
+    } tiler;
+    struct pan_tls_info tlsinfo;
+    unsigned wls_total_size;
+@@ -76,6 +83,11 @@ struct panvk_batch {
+    uint32_t joined;
+ };
+ 
++/* Worst-case binning for this many vertices in one layer of this size stays
++ * under 14 MiB of a 16 MiB small tiler heap */
++#define PANVK_SMALL_HEAP_MAX_VERTICES 32768
++#define PANVK_SMALL_HEAP_MAX_PIXELS   (1920 * 1088)
++
+ /* The fragment job of a batch runs after every job submitted before it, so
+  * dependencies on these stages alone don't hold back the vertex/tiler jobs. */
+ #define PANVK_FRAGMENT_STAGES                                                  \
+diff --git a/src/panfrost/vulkan/jm/panvk_queue.h b/src/panfrost/vulkan/jm/panvk_queue.h
+index 2155e4c..077652e 100644
+--- a/src/panfrost/vulkan/jm/panvk_queue.h
++++ b/src/panfrost/vulkan/jm/panvk_queue.h
+@@ -19,8 +19,9 @@
+ struct panvk_gpu_queue {
+    struct vk_queue vk;
+    uint32_t sync;
+-   /* Index of the tiler heap the next batch uses */
+-   uint32_t tiler_heap;
++   /* Index of the tiler heap the next batch uses and of the first small
++    * tiler heap the next submission uses */
++   uint32_t tiler_heap, small_tiler_heap;
+    /* A barrier still has to hold back the next vertex/tiler job */
+    bool serialize_pending;
+ };
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+index 483b155..ac330e2 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_buffer.c
+@@ -334,6 +334,10 @@ panvk_per_arch(cmd_prepare_tiler_context)(struct panvk_cmd_buffer *cmdbuf,
+    if (!batch->tiler.heap_desc.gpu || !batch->tiler.ctx_descs.gpu)
+       return VK_ERROR_OUT_OF_DEVICE_MEMORY;
+ 
++   batch->tiler.small_fb =
++      layer_count == 1 &&
++      fb->width_px * fb->height_px <= PANVK_SMALL_HEAP_MAX_PIXELS;
++
+    tiler_desc =
+       batch->tiler.ctx_descs.gpu + (pan_size(TILER_CONTEXT) * layer_idx);
+ 
+@@ -460,7 +464,7 @@ panvk_per_arch(cmd_init_poly_heap)(struct panvk_cmd_buffer *cmdbuf,
+ 
+ /* Batches are joined with a barriered cache flush between them. A group takes
+  * at most half the tiler heaps so the next group can use the other half. */
+-#define PANVK_JOIN_MAX_BATCHES 16
++#define PANVK_JOIN_MAX_BATCHES 32
+ 
+ static struct mali_job_header_packed *
+ panvk_batch_find_job(const struct panvk_batch *batch, uint32_t index, bool frag)
+@@ -519,15 +523,23 @@ static void
+ panvk_join_batches(struct panvk_cmd_buffer *cmdbuf)
+ {
+    struct panvk_device *dev = to_panvk_device(cmdbuf->vk.base.device);
+-   const uint32_t max_tiler_batches = ARRAY_SIZE(dev->tiler_heaps) / 2;
++   /* Consecutive submissions take different heaps, so a batch's vertex/tiler
++    * jobs can run while the fragment jobs before it still read theirs. */
++   const uint32_t max_heaps = ARRAY_SIZE(dev->tiler_heaps) / 2;
++   const uint32_t max_small_heaps = ARRAY_SIZE(dev->small_tiler_heaps) / 2;
+    struct panvk_batch *head = NULL;
+-   uint32_t tiler_batches = 0;
++   uint32_t heaps = 0, small_heaps = 0;
+ 
+    if (PANVK_DEBUG(NO_JOIN))
+       return;
+ 
+    list_for_each_entry(struct panvk_batch, batch, &cmdbuf->batches, node) {
+       const bool tiler = batch->tiler.heap_desc.cpu != NULL;
++      const bool small = tiler && batch->tiler.small_fb &&
++                         batch->tiler.vertex_count <=
++                            PANVK_SMALL_HEAP_MAX_VERTICES;
++
++      batch->tiler.small_heap = small;
+       bool joinable =
+          head && !batch->no_join && !batch->serialize &&
+          !util_dynarray_num_elements(&batch->event_ops,
+@@ -535,7 +547,8 @@ panvk_join_batches(struct panvk_cmd_buffer *cmdbuf)
+          !util_dynarray_num_elements(&head->event_ops,
+                                      struct panvk_cmd_event_op) &&
+          head->joined + 1 < PANVK_JOIN_MAX_BATCHES &&
+-         (!tiler || tiler_batches < max_tiler_batches);
++         (!tiler || (small ? small_heaps < max_small_heaps
++                           : heaps < max_heaps));
+ 
+       struct mali_job_header_packed *vtc_first = NULL, *frag_first = NULL;
+       struct pan_ptr vtc_flush = {0}, frag_flush = {0};
+@@ -556,7 +569,8 @@ panvk_join_batches(struct panvk_cmd_buffer *cmdbuf)
+ 
+       if (!joinable) {
+          head = batch;
+-         tiler_batches = tiler;
++         heaps = tiler && !small;
++         small_heaps = small;
+          continue;
+       }
+ 
+@@ -566,7 +580,8 @@ panvk_join_batches(struct panvk_cmd_buffer *cmdbuf)
+                        frag_flush, batch->frag_index_base + 1);
+       batch->is_joined = true;
+       head->joined++;
+-      tiler_batches += tiler;
++      heaps += tiler && !small;
++      small_heaps += small;
+    }
+ }
+ 
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+index 360369a..6bb4a6e 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_cmd_draw.c
+@@ -81,8 +81,23 @@ struct panvk_draw_data {
+ 
+    /* Short direct indexed draw whose patching job finds the index range */
+    bool direct_indexed;
++
++   /* Vertices or indices drawn, 0 if unknown */
++   uint64_t tiler_vertices;
+ };
+ 
++static void
++panvk_batch_add_tiler_vertices(struct panvk_batch *batch,
++                               const struct panvk_draw_data *draw)
++{
++   uint64_t count = draw->tiler_vertices ? draw->tiler_vertices : UINT64_MAX;
++
++   if (count > UINT64_MAX - batch->tiler.vertex_count)
++      batch->tiler.vertex_count = UINT64_MAX;
++   else
++      batch->tiler.vertex_count += count;
++}
++
+ static bool
+ is_indirect_draw(const struct panvk_draw_data *draw)
+ {
+@@ -1396,6 +1411,8 @@ panvk_cmd_draw(struct panvk_cmd_buffer *cmdbuf, struct panvk_draw_data *draw)
+ 
+    struct panvk_batch *batch = cmdbuf->cur_batch;
+ 
++   panvk_batch_add_tiler_vertices(batch, draw);
++
+    uint32_t view_mask = cmdbuf->state.gfx.render.view_mask;
+    assert(view_mask == 0 || util_bitcount(view_mask) <= batch->fb.layer_count);
+    uint32_t enabled_layer_count = view_mask
+@@ -1451,6 +1468,8 @@ panvk_cmd_draw_indirect(struct panvk_cmd_buffer *cmdbuf,
+    const struct vk_vertex_input_state *vi =
+       cmdbuf->vk.dynamic_graphics_state.vi;
+ 
++   panvk_batch_add_tiler_vertices(batch, draw);
++
+    unsigned init_heap_job_id;
+    result = panvk_per_arch(cmd_init_poly_heap)(cmdbuf, &init_heap_job_id);
+    if (result != VK_SUCCESS)
+@@ -1706,6 +1725,7 @@ panvk_per_arch(CmdDraw)(VkCommandBuffer commandBuffer, uint32_t vertexCount,
+       .vertex_range = vertexCount,
+       .padded_vertex_count =
+          padded_vertex_count(cmdbuf, vertexCount, instanceCount),
++      .tiler_vertices = (uint64_t)vertexCount * instanceCount,
+    };
+ 
+    panvk_cmd_draw(cmdbuf, &draw);
+@@ -1755,6 +1775,7 @@ panvk_per_arch(CmdDrawIndexed)(VkCommandBuffer commandBuffer,
+       /* One workgroup searches 64 * 1024 indices in a single pass */
+       .direct_indexed =
+          indexCount <= 65536 && instanceCount == 1 && layer_count == 1,
++      .tiler_vertices = (uint64_t)indexCount * instanceCount,
+    };
+    draw.info.index.count = indexCount;
+ 
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+index 6b99bcd..78930cd 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+@@ -304,7 +304,11 @@ panvk_per_arch(gpu_queue_submit)(struct vk_queue *vk_queue, struct vk_queue_subm
+ 
+          /* Batches take the heaps in turn, so implicit fencing on a heap only
+           * orders a batch after the fragment job that last used it */
+-         const struct panvk_priv_bo *heaps[ARRAY_SIZE(dev->tiler_heaps)];
++         const struct panvk_priv_bo
++            *heaps[ARRAY_SIZE(dev->tiler_heaps) +
++                   ARRAY_SIZE(dev->small_tiler_heaps)];
++         const uint32_t small_half = ARRAY_SIZE(dev->small_tiler_heaps) / 2;
++         uint32_t small_heap = queue->small_tiler_heap;
+          unsigned nr_heaps = 0, nr_blit_bos = 0, nr_fb_bos = 0;
+          bool flush_descs = false;
+          struct panvk_batch *member = batch;
+@@ -312,7 +315,11 @@ panvk_per_arch(gpu_queue_submit)(struct vk_queue *vk_queue, struct vk_queue_subm
+          for (uint32_t i = 0; i <= batch->joined; i++) {
+             const struct panvk_priv_bo *heap = NULL;
+ 
+-            if (member->tiler.heap_desc.cpu) {
++            if (member->tiler.small_heap) {
++               assert(small_heap < queue->small_tiler_heap + small_half);
++               heap = dev->small_tiler_heaps[small_heap++];
++               heaps[nr_heaps++] = heap;
++            } else if (member->tiler.heap_desc.cpu) {
+                heap = dev->tiler_heaps[queue->tiler_heap];
+                queue->tiler_heap = (queue->tiler_heap + 1) %
+                                    ARRAY_SIZE(dev->tiler_heaps);
+@@ -326,6 +333,11 @@ panvk_per_arch(gpu_queue_submit)(struct vk_queue *vk_queue, struct vk_queue_subm
+             member = list_entry(member->node.next, struct panvk_batch, node);
+          }
+ 
++         if (small_heap != queue->small_tiler_heap) {
++            queue->small_tiler_heap = (queue->small_tiler_heap + small_half) %
++                                      ARRAY_SIZE(dev->small_tiler_heaps);
++         }
++
+          /* The command buffer pools are private, so keep them off the BO
+           * lists where implicit fencing would serialize the batches */
+          unsigned nr_vtc_bos = nr_blit_bos + nr_heaps;
+diff --git a/src/panfrost/vulkan/panvk_device.h b/src/panfrost/vulkan/panvk_device.h
+index 0cf1a1c..4be603b 100644
+--- a/src/panfrost/vulkan/panvk_device.h
++++ b/src/panfrost/vulkan/panvk_device.h
+@@ -70,6 +70,9 @@ struct panvk_device {
+    /* JM batches take them in turn, so a batch's vertex/tiler jobs can run
+     * while the fragment jobs of earlier batches still read their heaps. */
+    struct panvk_priv_bo *tiler_heaps[8];
++   /* Batches known to need little heap take these, so that more of them can
++    * share a submission without using more of the GPU address space. */
++   struct panvk_priv_bo *small_tiler_heaps[32];
+    struct panvk_priv_bo *sample_positions;
+ 
+    struct {
+diff --git a/src/panfrost/vulkan/panvk_vX_device.c b/src/panfrost/vulkan/panvk_vX_device.c
+index eefa289..29a8f3c 100644
+--- a/src/panfrost/vulkan/panvk_vX_device.c
++++ b/src/panfrost/vulkan/panvk_vX_device.c
+@@ -591,6 +591,15 @@ panvk_per_arch(create_device)(struct panvk_physical_device *physical_device,
+       if (result != VK_SUCCESS)
+          goto err_free_priv_bos;
+    }
++
++   for (uint32_t i = 0; i < ARRAY_SIZE(device->small_tiler_heaps); i++) {
++      result = panvk_priv_bo_create(
++         device, 16 * 1024 * 1024,
++         PAN_KMOD_BO_FLAG_NO_MMAP | PAN_KMOD_BO_FLAG_ALLOC_ON_FAULT,
++         VK_SYSTEM_ALLOCATION_SCOPE_DEVICE, &device->small_tiler_heaps[i]);
++      if (result != VK_SUCCESS)
++         goto err_free_priv_bos;
++   }
+ #endif
+ 
+    result = panvk_priv_bo_create(
+@@ -709,6 +718,8 @@ err_free_priv_bos:
+ #endif
+    for (uint32_t i = 0; i < ARRAY_SIZE(device->tiler_heaps); i++)
+       panvk_priv_bo_unref(device->tiler_heaps[i]);
++   for (uint32_t i = 0; i < ARRAY_SIZE(device->small_tiler_heaps); i++)
++      panvk_priv_bo_unref(device->small_tiler_heaps[i]);
+    panvk_device_cleanup_mempools(device);
+    vk_free(&device->vk.alloc, device->dump_region_size);
+    pan_kmod_vm_destroy(device->kmod.vm);
+@@ -758,6 +769,8 @@ panvk_per_arch(destroy_device)(struct panvk_device *device,
+ #endif
+    for (uint32_t i = 0; i < ARRAY_SIZE(device->tiler_heaps); i++)
+       panvk_priv_bo_unref(device->tiler_heaps[i]);
++   for (uint32_t i = 0; i < ARRAY_SIZE(device->small_tiler_heaps); i++)
++      panvk_priv_bo_unref(device->small_tiler_heaps[i]);
+    panvk_priv_bo_unref(device->sample_positions);
+    panvk_device_cleanup_mempools(device);
+    vk_free(&device->vk.alloc, device->dump_region_size);
+-- 
+2.56.0
+
