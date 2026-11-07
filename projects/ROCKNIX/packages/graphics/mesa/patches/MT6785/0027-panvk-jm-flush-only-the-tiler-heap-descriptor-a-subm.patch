@@ -1,0 +1,110 @@
+From a95b949938ddf4775cdde0aad6a4da4c96fe3824 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Fri, 6 Nov 2026 21:52:04 -0800
+Subject: [PATCH] panvk/jm: flush only the tiler heap descriptor a submission
+ rewrites
+
+Most submissions rewrite only their batch's tiler heap descriptor, so
+flush just that instead of the whole descriptor pool. Command buffers
+submitted again still flush the whole pool.
+---
+ src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c | 15 +++++++++---
+ src/panfrost/vulkan/panvk_mempool.c         | 27 +++++++++++++++++++++
+ src/panfrost/vulkan/panvk_mempool.h         |  2 ++
+ 3 files changed, 40 insertions(+), 4 deletions(-)
+
+diff --git a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+index 7f79f23..6b99bcd 100644
+--- a/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
++++ b/src/panfrost/vulkan/jm/panvk_vX_gpu_queue.c
+@@ -32,9 +32,11 @@
+ #include "drm-uapi/panfrost_drm.h"
+ 
+ /* Readies a batch's descriptors for submission with the given tiler heap and
+- * returns whether they changed. */
++ * returns whether the whole descriptor pool needs flushing. */
+ static bool
+-panvk_queue_prepare_batch(struct panvk_device *dev, struct panvk_batch *batch,
++panvk_queue_prepare_batch(struct panvk_device *dev,
++                          struct panvk_cmd_buffer *cmdbuf,
++                          struct panvk_batch *batch,
+                           const struct panvk_priv_bo *heap)
+ {
+    bool flush_descs = batch->issued;
+@@ -56,7 +58,12 @@ panvk_queue_prepare_batch(struct panvk_device *dev, struct panvk_batch *batch,
+    /* The batch was recorded with heap 0 */
+    if (heap && (batch->issued || heap != dev->tiler_heaps[0])) {
+       panvk_per_arch(cmd_emit_tiler_heap)(batch->tiler.heap_desc.cpu, heap);
+-      flush_descs = true;
++
++      /* Only the heap descriptor changed */
++      if (!flush_descs) {
++         panvk_pool_flush_range(&cmdbuf->desc_pool, batch->tiler.heap_desc.gpu,
++                                pan_size(TILER_HEAP));
++      }
+    }
+ 
+    batch->issued = true;
+@@ -312,7 +319,7 @@ panvk_per_arch(gpu_queue_submit)(struct vk_queue *vk_queue, struct vk_queue_subm
+                heaps[nr_heaps++] = heap;
+             }
+ 
+-            flush_descs |= panvk_queue_prepare_batch(dev, member, heap);
++            flush_descs |= panvk_queue_prepare_batch(dev, cmdbuf, member, heap);
+             nr_blit_bos += (member->blit.src ? 1 : 0) +
+                            (member->blit.dst ? 1 : 0);
+             nr_fb_bos += member->fb.bo_count;
+diff --git a/src/panfrost/vulkan/panvk_mempool.c b/src/panfrost/vulkan/panvk_mempool.c
+index 75b243a..e596360 100644
+--- a/src/panfrost/vulkan/panvk_mempool.c
++++ b/src/panfrost/vulkan/panvk_mempool.c
+@@ -275,6 +275,33 @@ panvk_pool_flush_maps(struct panvk_pool *pool)
+       panvk_priv_bo_flush(bo, 0, bo->bo->size);
+ }
+ 
++/* Flushes the CPU caches for a range inside one of the pool's BOs. */
++void
++panvk_pool_flush_range(struct panvk_pool *pool, uint64_t dev_addr, size_t size)
++{
++   if (!(pool->props.create_flags & PAN_KMOD_BO_FLAG_WB_MMAP))
++      return;
++
++   /* Recent allocations are at the tail */
++   list_for_each_entry_rev(struct panvk_priv_bo, bo, &pool->bos, node) {
++      if (dev_addr >= bo->addr.dev &&
++          dev_addr + size <= bo->addr.dev + bo->bo->size) {
++         panvk_priv_bo_flush(bo, dev_addr - bo->addr.dev, size);
++         return;
++      }
++   }
++
++   list_for_each_entry_rev(struct panvk_priv_bo, bo, &pool->big_bos, node) {
++      if (dev_addr >= bo->addr.dev &&
++          dev_addr + size <= bo->addr.dev + bo->bo->size) {
++         panvk_priv_bo_flush(bo, dev_addr - bo->addr.dev, size);
++         return;
++      }
++   }
++
++   UNREACHABLE("Range not in the pool");
++}
++
+ void
+ panvk_pool_invalidate_maps(struct panvk_pool *pool)
+ {
+diff --git a/src/panfrost/vulkan/panvk_mempool.h b/src/panfrost/vulkan/panvk_mempool.h
+index 0e7a6ce..844b86e 100644
+--- a/src/panfrost/vulkan/panvk_mempool.h
++++ b/src/panfrost/vulkan/panvk_mempool.h
+@@ -108,6 +108,8 @@ panvk_pool_num_bos(struct panvk_pool *pool)
+ void panvk_pool_get_bo_handles(struct panvk_pool *pool, uint32_t *handles);
+ 
+ void panvk_pool_flush_maps(struct panvk_pool *pool);
++void panvk_pool_flush_range(struct panvk_pool *pool, uint64_t dev_addr,
++                            size_t size);
+ void panvk_pool_invalidate_maps(struct panvk_pool *pool);
+ 
+ enum panvk_priv_mem_flags {
+-- 
+2.56.0
+
