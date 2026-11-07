@@ -1,0 +1,46 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sat, 7 Nov 2026 22:00:00 +0000
+Subject: [PATCH] drm/mediatek: dsi: allow a fixed lane rate
+
+With a non-continuous clock the clock lane's LP transitions stretch every
+line, so the mode reports a higher refresh than the panel runs at. Add an
+optional mediatek,data-rate-hz that holds the lane rate so the mode clock
+can describe the real frame rate.
+---
+ drivers/gpu/drm/mediatek/mtk_dsi.c | 10 ++++++++--
+ 1 file changed, 8 insertions(+), 2 deletions(-)
+
+diff --git a/drivers/gpu/drm/mediatek/mtk_dsi.c b/drivers/gpu/drm/mediatek/mtk_dsi.c
+--- a/drivers/gpu/drm/mediatek/mtk_dsi.c
++++ b/drivers/gpu/drm/mediatek/mtk_dsi.c
+@@ -213,6 +213,7 @@ struct mtk_dsi {
+ 	struct clk *hs_clk;
+ 
+ 	u32 data_rate;
++	u32 fixed_data_rate;
+ 
+ 	unsigned long mode_flags;
+ 	enum mipi_dsi_pixel_format format;
+@@ -754,8 +755,12 @@ static int mtk_dsi_poweron(struct mtk_dsi *dsi)
+ 	}
+ 	bit_per_pixel = ret;
+ 
+-	dsi->data_rate = DIV_ROUND_UP_ULL(dsi->vm.pixelclock * bit_per_pixel,
+-					  dsi->lanes);
++	/* A fixed lane rate lets the mode clock describe the real line time */
++	if (dsi->fixed_data_rate)
++		dsi->data_rate = dsi->fixed_data_rate;
++	else
++		dsi->data_rate = DIV_ROUND_UP_ULL(dsi->vm.pixelclock * bit_per_pixel,
++						  dsi->lanes);
+ 
+ 	ret = clk_set_rate(dsi->hs_clk, dsi->data_rate);
+ 	if (ret < 0) {
+@@ -1255,6 +1260,7 @@ static int mtk_dsi_probe(struct platform_device *pdev)
+ 		return PTR_ERR(dsi);
+ 
+ 	dsi->driver_data = of_device_get_match_data(dev);
++	of_property_read_u32(dev->of_node, "mediatek,data-rate-hz", &dsi->fixed_data_rate);
+ 
+ 	dsi->engine_clk = devm_clk_get(dev, "engine");
+ 	if (IS_ERR(dsi->engine_clk))

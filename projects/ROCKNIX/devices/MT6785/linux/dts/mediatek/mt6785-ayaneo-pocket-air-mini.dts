@@ -1273,18 +1273,11 @@
 
 &dsi0 {
 	status = "okay";
+	mediatek,data-rate-hz = <532002000>;
 
 	/*
-	 * Stock st7703_hd720_lcm_drv: reset GPIO44, 1280x960 sync-pulse video at
-	 * the stock 532 Mbps per lane; mt6785-dsi (patches/0002) programs LK's
-	 * D-PHY timings and porches, so the link runs LK's 60.05 Hz. The clock
-	 * lane must drop to LP between lines (LK's HSTX_CKLP_EN): with a
-	 * continuous clock the panel shows only vertical lines. The I lines are
-	 * the stock lk_a table byte
-	 * for byte (VGH/VGL 0x58, CPUMP 0x32, AVDD 0xE0, AVEE 0x20); the source
-	 * LK's default over-drives these. Commands >= 0xB0 go out as generic
-	 * writes (gen=), the rest as DCS, as MTK's DSI_set_cmdq_V2 does. Waits
-	 * are hex ms.
+	 * Init table from the stock LK, clock lane must drop to LP between lines. The mode
+	 * clock gives the resulting 60.17 Hz, mediatek,data-rate-hz the 532 Mbps lane rate.
 	 */
 	panel@0 {
 		compatible = "rocknix,generic-dsi";
@@ -1294,7 +1287,7 @@
 
 		panel_description =
 			"G size=85,64 delays=10,10,120,20,0 format=rgb888 lanes=4 flags=0xc05",
-			"M clock=88667 horizontal=1280,60,30,60 vertical=960,16,8,8 default=1",
+			"M clock=85350 horizontal=1280,60,30,60 vertical=960,16,8,8 default=1",
 			"I gen=ee01",
 			"I gen=ea07",
 			"I gen=eb12",
