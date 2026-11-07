@@ -922,9 +922,52 @@
 	};
 };
 
+/* hold the CCI and L3 at 822 MHz or more, as MT8186 does (c41cd028e8fb) */
+&cluster0_opp {
+	opp-500000000 {
+		required-opps = <&cci_opp_5>;
+	};
+
+	opp-774000000 {
+		required-opps = <&cci_opp_5>;
+	};
+
+	opp-875000000 {
+		required-opps = <&cci_opp_5>;
+	};
+
+	opp-975000000 {
+		required-opps = <&cci_opp_5>;
+	};
+
+	opp-1075000000 {
+		required-opps = <&cci_opp_5>;
+	};
+};
+
 /* stock big-core top OPP is 2.1 GHz, not 2.05 GHz */
 &cluster1_opp {
 	/delete-node/ opp-2050000000;
+
+	opp-774000000 {
+		required-opps = <&cci_opp_5>;
+	};
+
+	opp-835000000 {
+		required-opps = <&cci_opp_5>;
+	};
+
+	opp-919000000 {
+		required-opps = <&cci_opp_5>;
+	};
+
+	opp-1002000000 {
+		required-opps = <&cci_opp_5>;
+	};
+
+	opp-1085000000 {
+		required-opps = <&cci_opp_5>;
+	};
 
 	opp-2100000000 {
 		opp-hz = /bits/ 64 <2100000000>;
