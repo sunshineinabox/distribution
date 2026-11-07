@@ -1,0 +1,549 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sat, 7 Nov 2026 21:00:00 +0000
+Subject: [PATCH] drm/mediatek: scale the MT6785 primary plane with DISP_RSZ0
+
+When the primary plane alone covers the CRTC from a smaller source, at
+most 1080 pixels wide, compose at the source size and let DISP_RSZ0
+between OVL_2L0 and RDMA0 upscale it to the mode. The resizer setup
+follows the vendor ddp_rsz.c single-tile mode.
+---
+ drivers/gpu/drm/mediatek/mtk_crtc.c     | 59 ++++++++++++++++
+ drivers/gpu/drm/mediatek/mtk_crtc.h     |  1 +
+ drivers/gpu/drm/mediatek/mtk_ddp_comp.c | 92 +++++++++++++++++++++++++
+ drivers/gpu/drm/mediatek/mtk_ddp_comp.h | 28 ++++++++
+ drivers/gpu/drm/mediatek/mtk_disp_drv.h |  2 +
+ drivers/gpu/drm/mediatek/mtk_disp_ovl.c |  9 +++
+ drivers/gpu/drm/mediatek/mtk_drm_drv.c  |  2 +
+ drivers/gpu/drm/mediatek/mtk_plane.c    | 41 +++++++++--
+ drivers/gpu/drm/mediatek/mtk_plane.h    |  6 ++
+ drivers/soc/mediatek/mt6785-mmsys.h     | 25 +++++++
+ drivers/soc/mediatek/mtk-mutex.c        |  2 +
+ include/linux/soc/mediatek/mtk-mmsys.h  |  1 +
+ 12 files changed, 261 insertions(+), 7 deletions(-)
+
+diff --git a/include/linux/soc/mediatek/mtk-mmsys.h b/include/linux/soc/mediatek/mtk-mmsys.h
+--- a/include/linux/soc/mediatek/mtk-mmsys.h
++++ b/include/linux/soc/mediatek/mtk-mmsys.h
+@@ -81,6 +81,7 @@ enum mtk_ddp_comp_id {
+ 	DDP_COMPONENT_UFOE,
+ 	DDP_COMPONENT_WDMA0,
+ 	DDP_COMPONENT_WDMA1,
++	DDP_COMPONENT_RSZ0,
+ 	DDP_COMPONENT_ID_MAX,
+ };
+ 
+diff --git a/drivers/soc/mediatek/mt6785-mmsys.h b/drivers/soc/mediatek/mt6785-mmsys.h
+--- a/drivers/soc/mediatek/mt6785-mmsys.h
++++ b/drivers/soc/mediatek/mt6785-mmsys.h
+@@ -11,6 +11,7 @@
+ #define MT6785_DISP_OVL0_2L_MOUT_EN	0xf04
+ #define MT6785_OVL0_2L_MOUT_EN_MASK	0x1f
+ #define MT6785_OVL0_2L_TO_RDMA0		BIT(0)
++#define MT6785_OVL0_2L_TO_RSZ0		BIT(4)
+ 
+ #define MT6785_DISP_OVL0_MOUT_EN	0xf08
+ #define MT6785_OVL0_MOUT_EN_MASK	0x1f
+@@ -21,6 +22,10 @@
+ #define MT6785_OVL1_2L_TO_RDMA0		BIT(0)
+ #define MT6785_OVL1_2L_TO_RDMA1		BIT(4)
+ 
++#define MT6785_DISP_RSZ_MOUT_EN		0xf10
++#define MT6785_RSZ_MOUT_EN_MASK		0x3f
++#define MT6785_RSZ_TO_RDMA0		BIT(3)
++
+ #define MT6785_DISP_OVL0_WCG_MOUT_EN	0xf34
+ #define MT6785_OVL0_WCG_MOUT_EN_MASK	0x3
+ #define MT6785_OVL0_TO_OVL0_2L		BIT(0)
+@@ -58,7 +63,12 @@
+ #define MT6785_RDMA0_FROM_OVL0		0
+ #define MT6785_RDMA0_FROM_OVL0_2L	1
+ #define MT6785_RDMA0_FROM_OVL1_2L	2
++#define MT6785_RDMA0_FROM_RSZ0		3
+ 
++#define MT6785_DISP_RSZ_SEL_IN		0xf7c
++#define MT6785_RSZ_SEL_IN_MASK		0xf
++#define MT6785_RSZ_FROM_OVL0_2L		5
++
+ #define MT6785_DISP_DPI0_SEL_IN		0xf88
+ #define MT6785_DPI0_SEL_IN_MASK		0xf
+ #define MT6785_DPI0_FROM_RDMA0		0
+@@ -205,6 +215,21 @@ static const struct mtk_mmsys_routes mmsys_mt6785_rout
+ 	MMSYS_ROUTE(OVL_2L0, OVL_2L1,
+ 		    MT6785_DISP_OVL1_2L_WCG_SEL_IN, MT6785_OVL1_2L_WCG_SEL_IN_MASK,
+ 		    MT6785_OVL1_2L_FROM_OVL0_2L),
++	MMSYS_ROUTE(OVL_2L0, RSZ0,
++		    MT6785_DISP_OVL0_2L_WCG_MOUT_EN, MT6785_OVL0_2L_WCG_MOUT_EN_MASK,
++		    0),
++	MMSYS_ROUTE(OVL_2L0, RSZ0,
++		    MT6785_DISP_OVL0_2L_MOUT_EN, MT6785_OVL0_2L_MOUT_EN_MASK,
++		    MT6785_OVL0_2L_TO_RSZ0),
++	MMSYS_ROUTE(OVL_2L0, RSZ0,
++		    MT6785_DISP_RSZ_SEL_IN, MT6785_RSZ_SEL_IN_MASK,
++		    MT6785_RSZ_FROM_OVL0_2L),
++	MMSYS_ROUTE(RSZ0, RDMA0,
++		    MT6785_DISP_RSZ_MOUT_EN, MT6785_RSZ_MOUT_EN_MASK,
++		    MT6785_RSZ_TO_RDMA0),
++	MMSYS_ROUTE(RSZ0, RDMA0,
++		    MT6785_DISP_RDMA0_SEL_IN, MT6785_RDMA0_SEL_IN_MASK,
++		    MT6785_RDMA0_FROM_RSZ0),
+ };
+ 
+ #endif /* __SOC_MEDIATEK_MT6785_MMSYS_H */
+diff --git a/drivers/soc/mediatek/mtk-mutex.c b/drivers/soc/mediatek/mtk-mutex.c
+--- a/drivers/soc/mediatek/mtk-mutex.c
++++ b/drivers/soc/mediatek/mtk-mutex.c
+@@ -296,6 +296,7 @@
+ #define MT2701_MUTEX_MOD_DISP_RDMA1		12
+ 
+ #define MT6785_MUTEX_MOD_DISP_POSTMASK0		21
++#define MT6785_MUTEX_MOD_DISP_RSZ0		22
+ 
+ #define MT2712_MUTEX_SOF_SINGLE_MODE		0
+ #define MT2712_MUTEX_SOF_DSI0			1
+@@ -409,6 +410,7 @@ static const u8 mt6785_mutex_mod[DDP_COMPONENT_ID_MAX]
+ 	[DDP_COMPONENT_OVL_2L0] = MT8183_MUTEX_MOD_DISP_OVL0_2L,
+ 	[DDP_COMPONENT_OVL_2L1] = MT8183_MUTEX_MOD_DISP_OVL1_2L,
+ 	[DDP_COMPONENT_POSTMASK0] = MT6785_MUTEX_MOD_DISP_POSTMASK0,
++	[DDP_COMPONENT_RSZ0] = MT6785_MUTEX_MOD_DISP_RSZ0,
+ 	[DDP_COMPONENT_RDMA0] = MT8183_MUTEX_MOD_DISP_RDMA0,
+ 	[DDP_COMPONENT_RDMA1] = MT8183_MUTEX_MOD_DISP_RDMA1,
+ 	[DDP_COMPONENT_WDMA0] = MT8183_MUTEX_MOD_DISP_WDMA0,
+diff --git a/drivers/gpu/drm/mediatek/mtk_crtc.c b/drivers/gpu/drm/mediatek/mtk_crtc.c
+--- a/drivers/gpu/drm/mediatek/mtk_crtc.c
++++ b/drivers/gpu/drm/mediatek/mtk_crtc.c
+@@ -66,6 +66,11 @@ struct mtk_crtc {
+ 	unsigned int			num_conn_routes;
+ 	const struct mtk_drm_route	*conn_routes;
+ 
++	/* Resizer index in ddp_comp (0 if none) and the canvas size before it */
++	unsigned int			rsz_idx;
++	unsigned int			canvas_w;
++	unsigned int			canvas_h;
++
+ 	/* lock for display hardware access */
+ 	struct mutex			hw_lock;
+ 	bool				config_updating;
+@@ -411,6 +416,8 @@ static int mtk_crtc_ddp_hw_init(struct mtk_crtc *mtk_c
+ 		mtk_ddp_comp_config(comp, width, height, vrefresh, bpc, NULL);
+ 		mtk_ddp_comp_start(comp);
+ 	}
++	mtk_crtc->canvas_w = width;
++	mtk_crtc->canvas_h = height;
+ 
+ 	/* Initially configure all planes */
+ 	for (i = 0; i < mtk_crtc->layer_nr; i++) {
+@@ -503,6 +510,29 @@ static void mtk_crtc_ddp_config(struct drm_crtc *crtc,
+ 
+ 		if (!cmdq_handle)
+ 			state->pending_config = false;
++		mtk_crtc->canvas_w = 0;
++	}
++
++	/* A scaled primary plane is composed at its source size and upscaled */
++	if (mtk_crtc->rsz_idx) {
++		const struct drm_plane_state *primary = crtc->primary->state;
++		unsigned int out_w = crtc->state->adjusted_mode.hdisplay;
++		unsigned int out_h = crtc->state->adjusted_mode.vdisplay;
++		unsigned int w = out_w, h = out_h;
++
++		if (primary && primary->visible && mtk_plane_state_scaled(primary)) {
++			w = primary->src_w >> 16;
++			h = primary->src_h >> 16;
++		}
++
++		if (w != mtk_crtc->canvas_w || h != mtk_crtc->canvas_h) {
++			for (i = 0; i < mtk_crtc->rsz_idx; i++)
++				mtk_ddp_comp_set_roi(mtk_crtc->ddp_comp[i], w, h, cmdq_handle);
++			mtk_ddp_comp_scale(mtk_crtc->ddp_comp[mtk_crtc->rsz_idx], w, h,
++					   out_w, out_h, cmdq_handle);
++			mtk_crtc->canvas_w = w;
++			mtk_crtc->canvas_h = h;
++		}
+ 	}
+ 
+ 	if (mtk_crtc->pending_planes) {
+@@ -892,7 +922,34 @@ static const struct drm_crtc_funcs mtk_crtc_funcs = {
+ 	.disable_vblank		= mtk_crtc_disable_vblank,
+ };
+ 
++/* The resizer scales the whole canvas, so a scaled primary plane must be alone */
++static int mtk_crtc_atomic_check(struct drm_crtc *crtc,
++				 struct drm_atomic_state *state)
++{
++	struct drm_crtc_state *crtc_state = drm_atomic_get_new_crtc_state(state, crtc);
++	const struct drm_plane_state *plane_state;
++	struct drm_plane *plane;
++	bool scaled = false, others = false;
++
++	drm_atomic_crtc_state_for_each_plane_state(plane, plane_state, crtc_state) {
++		if (!plane_state->visible)
++			continue;
++		if (plane == crtc->primary)
++			scaled = mtk_plane_state_scaled(plane_state);
++		else
++			others = true;
++	}
++
++	return scaled && others ? -EINVAL : 0;
++}
++
++bool mtk_crtc_can_scale(struct drm_crtc *crtc)
++{
++	return to_mtk_crtc(crtc)->rsz_idx;
++}
++
+ static const struct drm_crtc_helper_funcs mtk_crtc_helper_funcs = {
++	.atomic_check	= mtk_crtc_atomic_check,
+ 	.mode_fixup	= mtk_crtc_mode_fixup,
+ 	.mode_set_nofb	= mtk_crtc_mode_set_nofb,
+ 	.mode_valid	= mtk_crtc_mode_valid,
+@@ -1074,6 +1131,8 @@ int mtk_crtc_create(struct drm_device *drm_dev, const 
+ 
+ 		comp = &priv->ddp_comp[comp_id];
+ 		mtk_crtc->ddp_comp[i] = comp;
++		if (i && mtk_ddp_comp_can_scale(comp))
++			mtk_crtc->rsz_idx = i;
+ 
+ 		if (comp->funcs) {
+ 			if (comp->funcs->gamma_set && comp->funcs->gamma_get_lut_size) {
+diff --git a/drivers/gpu/drm/mediatek/mtk_crtc.h b/drivers/gpu/drm/mediatek/mtk_crtc.h
+--- a/drivers/gpu/drm/mediatek/mtk_crtc.h
++++ b/drivers/gpu/drm/mediatek/mtk_crtc.h
+@@ -25,5 +25,6 @@ struct device *mtk_crtc_dma_dev_get(struct drm_crtc *c
+ void mtk_crtc_async_update(struct drm_crtc *crtc, struct drm_plane *plane,
+ 			   struct drm_atomic_state *plane_state);
+ struct device *mtk_crtc_dma_dev_get(struct drm_crtc *crtc);
++bool mtk_crtc_can_scale(struct drm_crtc *crtc);
+ 
+ #endif /* MTK_CRTC_H */
+diff --git a/drivers/gpu/drm/mediatek/mtk_ddp_comp.c b/drivers/gpu/drm/mediatek/mtk_ddp_comp.c
+--- a/drivers/gpu/drm/mediatek/mtk_ddp_comp.c
++++ b/drivers/gpu/drm/mediatek/mtk_ddp_comp.c
+@@ -57,6 +57,24 @@
+ #define POSTMASK_RELAY_MODE				BIT(0)
+ #define DISP_REG_POSTMASK_SIZE			0x0030
+ 
++#define DISP_REG_RSZ_ENABLE			0x0000
++#define RSZ_EN					BIT(0)
++#define DISP_REG_RSZ_CONTROL_1			0x0004
++#define RSZ_HORIZONTAL_EN			BIT(0)
++#define RSZ_VERTICAL_EN				BIT(1)
++#define DISP_REG_RSZ_CONTROL_2			0x0008
++#define DISP_REG_RSZ_INPUT_IMAGE		0x0010
++#define DISP_REG_RSZ_OUTPUT_IMAGE		0x0014
++#define DISP_REG_RSZ_HOR_STEP			0x0018
++#define DISP_REG_RSZ_VER_STEP			0x001c
++#define DISP_REG_RSZ_HOR_INT_OFFSET		0x0020
++#define DISP_REG_RSZ_HOR_SUB_OFFSET		0x0024
++#define DISP_REG_RSZ_VER_INT_OFFSET		0x0028
++#define DISP_REG_RSZ_VER_SUB_OFFSET		0x002c
++#define DISP_REG_RSZ_SHADOW_CTRL		0x00f0
++#define RSZ_BYPASS_SHADOW			BIT(0)
++#define RSZ_UNIT				32768
++
+ #define DISP_REG_UFO_START			0x0000
+ #define UFO_BYPASS				BIT(2)
+ 
+@@ -259,8 +277,70 @@ static void mtk_postmask_stop(struct device *dev)
+ 	struct mtk_ddp_comp_dev *priv = dev_get_drvdata(dev);
+ 
+ 	writel_relaxed(0x0, priv->regs + DISP_REG_POSTMASK_EN);
++}
++
++/*
++ * Upscale only. The first and last output samples sit on the edge inputs,
++ * with a centred start phase of -1 + sub / RSZ_UNIT input pixels.
++ */
++static void mtk_rsz_axis(struct mtk_ddp_comp_dev *priv, struct cmdq_pkt *cmdq_pkt,
++			 unsigned int in, unsigned int out, unsigned int step_reg,
++			 unsigned int int_reg, unsigned int sub_reg)
++{
++	u32 step = out > 1 ? (RSZ_UNIT * (in - 1) + out - 2) / (out - 1) : RSZ_UNIT;
++	u32 offset = (step * (out - 1) - RSZ_UNIT * (in - 1)) / 2;
++
++	mtk_ddp_write(cmdq_pkt, step, &priv->cmdq_reg, priv->regs, step_reg);
++	mtk_ddp_write(cmdq_pkt, offset ? 0xffff : 0, &priv->cmdq_reg, priv->regs, int_reg);
++	mtk_ddp_write(cmdq_pkt, offset ? RSZ_UNIT - offset : 0, &priv->cmdq_reg,
++		      priv->regs, sub_reg);
++}
++
++static void mtk_rsz_scale(struct device *dev, unsigned int in_w, unsigned int in_h,
++			  unsigned int out_w, unsigned int out_h,
++			  struct cmdq_pkt *cmdq_pkt)
++{
++	struct mtk_ddp_comp_dev *priv = dev_get_drvdata(dev);
++	u32 ctrl = (in_w != out_w ? RSZ_HORIZONTAL_EN : 0) |
++		   (in_h != out_h ? RSZ_VERTICAL_EN : 0);
++
++	mtk_ddp_write(cmdq_pkt, ctrl, &priv->cmdq_reg, priv->regs, DISP_REG_RSZ_CONTROL_1);
++	mtk_ddp_write(cmdq_pkt, in_h << 16 | in_w, &priv->cmdq_reg, priv->regs,
++		      DISP_REG_RSZ_INPUT_IMAGE);
++	mtk_ddp_write(cmdq_pkt, out_h << 16 | out_w, &priv->cmdq_reg, priv->regs,
++		      DISP_REG_RSZ_OUTPUT_IMAGE);
++	mtk_rsz_axis(priv, cmdq_pkt, in_w, out_w, DISP_REG_RSZ_HOR_STEP,
++		     DISP_REG_RSZ_HOR_INT_OFFSET, DISP_REG_RSZ_HOR_SUB_OFFSET);
++	mtk_rsz_axis(priv, cmdq_pkt, in_h, out_h, DISP_REG_RSZ_VER_STEP,
++		     DISP_REG_RSZ_VER_INT_OFFSET, DISP_REG_RSZ_VER_SUB_OFFSET);
+ }
+ 
++static void mtk_rsz_config(struct device *dev, unsigned int w,
++			   unsigned int h, unsigned int vrefresh,
++			   unsigned int bpc, struct cmdq_pkt *cmdq_pkt)
++{
++	struct mtk_ddp_comp_dev *priv = dev_get_drvdata(dev);
++
++	mtk_ddp_write(cmdq_pkt, RSZ_BYPASS_SHADOW, &priv->cmdq_reg, priv->regs,
++		      DISP_REG_RSZ_SHADOW_CTRL);
++	mtk_ddp_write(cmdq_pkt, 0, &priv->cmdq_reg, priv->regs, DISP_REG_RSZ_CONTROL_2);
++	mtk_rsz_scale(dev, w, h, w, h, cmdq_pkt);
++}
++
++static void mtk_rsz_start(struct device *dev)
++{
++	struct mtk_ddp_comp_dev *priv = dev_get_drvdata(dev);
++
++	writel(RSZ_EN, priv->regs + DISP_REG_RSZ_ENABLE);
++}
++
++static void mtk_rsz_stop(struct device *dev)
++{
++	struct mtk_ddp_comp_dev *priv = dev_get_drvdata(dev);
++
++	writel_relaxed(0x0, priv->regs + DISP_REG_RSZ_ENABLE);
++}
++
+ static void mtk_ufoe_start(struct device *dev)
+ {
+ 	struct mtk_ddp_comp_dev *priv = dev_get_drvdata(dev);
+@@ -367,6 +447,7 @@ static const struct mtk_ddp_comp_funcs ddp_ovl = {
+ 	.get_formats = mtk_ovl_get_formats,
+ 	.get_num_formats = mtk_ovl_get_num_formats,
+ 	.is_afbc_supported = mtk_ovl_is_afbc_supported,
++	.set_roi = mtk_ovl_set_roi,
+ };
+ 
+ static const struct mtk_ddp_comp_funcs ddp_postmask = {
+@@ -393,6 +474,15 @@ static const struct mtk_ddp_comp_funcs ddp_rdma = {
+ 	.get_num_formats = mtk_rdma_get_num_formats,
+ };
+ 
++static const struct mtk_ddp_comp_funcs ddp_rsz = {
++	.clk_enable = mtk_ddp_clk_enable,
++	.clk_disable = mtk_ddp_clk_disable,
++	.config = mtk_rsz_config,
++	.start = mtk_rsz_start,
++	.stop = mtk_rsz_stop,
++	.scale = mtk_rsz_scale,
++};
++
+ static const struct mtk_ddp_comp_funcs ddp_ufoe = {
+ 	.clk_enable = mtk_ddp_clk_enable,
+ 	.clk_disable = mtk_ddp_clk_disable,
+@@ -441,6 +531,7 @@ static const char * const mtk_ddp_comp_stem[MTK_DDP_CO
+ 	[MTK_DISP_POSTMASK] = "postmask",
+ 	[MTK_DISP_PWM] = "pwm",
+ 	[MTK_DISP_RDMA] = "rdma",
++	[MTK_DISP_RSZ] = "rsz",
+ 	[MTK_DISP_UFOE] = "ufoe",
+ 	[MTK_DISP_WDMA] = "wdma",
+ 	[MTK_DP_INTF] = "dp-intf",
+@@ -495,6 +586,7 @@ static const struct mtk_ddp_comp_match mtk_ddp_matches
+ 	[DDP_COMPONENT_RDMA1]		= { MTK_DISP_RDMA,		1, &ddp_rdma },
+ 	[DDP_COMPONENT_RDMA2]		= { MTK_DISP_RDMA,		2, &ddp_rdma },
+ 	[DDP_COMPONENT_RDMA4]		= { MTK_DISP_RDMA,		4, &ddp_rdma },
++	[DDP_COMPONENT_RSZ0]		= { MTK_DISP_RSZ,		0, &ddp_rsz },
+ 	[DDP_COMPONENT_UFOE]		= { MTK_DISP_UFOE,		0, &ddp_ufoe },
+ 	[DDP_COMPONENT_WDMA0]		= { MTK_DISP_WDMA,		0, NULL },
+ 	[DDP_COMPONENT_WDMA1]		= { MTK_DISP_WDMA,		1, NULL },
+diff --git a/drivers/gpu/drm/mediatek/mtk_ddp_comp.h b/drivers/gpu/drm/mediatek/mtk_ddp_comp.h
+--- a/drivers/gpu/drm/mediatek/mtk_ddp_comp.h
++++ b/drivers/gpu/drm/mediatek/mtk_ddp_comp.h
+@@ -38,6 +38,7 @@ enum mtk_ddp_comp_type {
+ 	MTK_DISP_POSTMASK,
+ 	MTK_DISP_PWM,
+ 	MTK_DISP_RDMA,
++	MTK_DISP_RSZ,
+ 	MTK_DISP_UFOE,
+ 	MTK_DISP_WDMA,
+ 	MTK_DPI,
+@@ -90,6 +91,11 @@ struct mtk_ddp_comp_funcs {
+ 	void (*remove)(struct device *dev, struct mtk_mutex *mutex);
+ 	unsigned int (*encoder_index)(struct device *dev);
+ 	enum drm_mode_status (*mode_valid)(struct device *dev, const struct drm_display_mode *mode);
++	void (*set_roi)(struct device *dev, unsigned int w, unsigned int h,
++			struct cmdq_pkt *cmdq_pkt);
++	void (*scale)(struct device *dev, unsigned int in_w, unsigned int in_h,
++		      unsigned int out_w, unsigned int out_h,
++		      struct cmdq_pkt *cmdq_pkt);
+ };
+ 
+ struct mtk_ddp_comp {
+@@ -240,8 +246,30 @@ static inline void mtk_ddp_gamma_set(struct mtk_ddp_co
+ {
+ 	if (comp->funcs && comp->funcs->gamma_set)
+ 		comp->funcs->gamma_set(comp->dev, state);
++}
++
++static inline void mtk_ddp_comp_set_roi(struct mtk_ddp_comp *comp,
++					unsigned int w, unsigned int h,
++					struct cmdq_pkt *cmdq_pkt)
++{
++	if (comp->funcs && comp->funcs->set_roi)
++		comp->funcs->set_roi(comp->dev, w, h, cmdq_pkt);
++}
++
++static inline bool mtk_ddp_comp_can_scale(struct mtk_ddp_comp *comp)
++{
++	return comp->funcs && comp->funcs->scale;
+ }
+ 
++static inline void mtk_ddp_comp_scale(struct mtk_ddp_comp *comp,
++				      unsigned int in_w, unsigned int in_h,
++				      unsigned int out_w, unsigned int out_h,
++				      struct cmdq_pkt *cmdq_pkt)
++{
++	if (mtk_ddp_comp_can_scale(comp))
++		comp->funcs->scale(comp->dev, in_w, in_h, out_w, out_h, cmdq_pkt);
++}
++
+ static inline void mtk_ddp_comp_bgclr_in_on(struct mtk_ddp_comp *comp)
+ {
+ 	if (comp->funcs && comp->funcs->bgclr_in_on)
+diff --git a/drivers/gpu/drm/mediatek/mtk_disp_drv.h b/drivers/gpu/drm/mediatek/mtk_disp_drv.h
+--- a/drivers/gpu/drm/mediatek/mtk_disp_drv.h
++++ b/drivers/gpu/drm/mediatek/mtk_disp_drv.h
+@@ -81,6 +81,8 @@ void mtk_ovl_clk_disable(struct device *dev);
+ void mtk_ovl_bypass_shadow(struct device *dev);
+ int mtk_ovl_clk_enable(struct device *dev);
+ void mtk_ovl_clk_disable(struct device *dev);
++void mtk_ovl_set_roi(struct device *dev, unsigned int w, unsigned int h,
++		     struct cmdq_pkt *cmdq_pkt);
+ void mtk_ovl_config(struct device *dev, unsigned int w,
+ 		    unsigned int h, unsigned int vrefresh,
+ 		    unsigned int bpc, struct cmdq_pkt *cmdq_pkt);
+diff --git a/drivers/gpu/drm/mediatek/mtk_disp_ovl.c b/drivers/gpu/drm/mediatek/mtk_disp_ovl.c
+--- a/drivers/gpu/drm/mediatek/mtk_disp_ovl.c
++++ b/drivers/gpu/drm/mediatek/mtk_disp_ovl.c
+@@ -327,6 +327,15 @@ static void mtk_ovl_set_bit_depth(struct device *dev, 
+ 			   OVL_CON_CLRFMT_BIT_DEPTH_MASK(idx));
+ }
+ 
++void mtk_ovl_set_roi(struct device *dev, unsigned int w, unsigned int h,
++		     struct cmdq_pkt *cmdq_pkt)
++{
++	struct mtk_disp_ovl *ovl = dev_get_drvdata(dev);
++
++	mtk_ddp_write_relaxed(cmdq_pkt, h << 16 | w, &ovl->cmdq_reg, ovl->regs,
++			      DISP_REG_OVL_ROI_SIZE);
++}
++
+ void mtk_ovl_config(struct device *dev, unsigned int w,
+ 		    unsigned int h, unsigned int vrefresh,
+ 		    unsigned int bpc, struct cmdq_pkt *cmdq_pkt)
+diff --git a/drivers/gpu/drm/mediatek/mtk_drm_drv.c b/drivers/gpu/drm/mediatek/mtk_drm_drv.c
+--- a/drivers/gpu/drm/mediatek/mtk_drm_drv.c
++++ b/drivers/gpu/drm/mediatek/mtk_drm_drv.c
+@@ -780,6 +780,8 @@ static const struct of_device_id mtk_ddp_comp_dt_ids[]
+ 	  .data = (void *)MTK_DISP_OVL_2L },
+ 	{ .compatible = "mediatek,mt8192-disp-ovl-2l",
+ 	  .data = (void *)MTK_DISP_OVL_2L },
++	{ .compatible = "mediatek,mt6785-disp-rsz",
++	  .data = (void *)MTK_DISP_RSZ },
+ 	{ .compatible = "mediatek,mt8192-disp-postmask",
+ 	  .data = (void *)MTK_DISP_POSTMASK },
+ 	{ .compatible = "mediatek,mt2701-disp-pwm",
+diff --git a/drivers/gpu/drm/mediatek/mtk_plane.c b/drivers/gpu/drm/mediatek/mtk_plane.c
+--- a/drivers/gpu/drm/mediatek/mtk_plane.c
++++ b/drivers/gpu/drm/mediatek/mtk_plane.c
+@@ -20,6 +20,10 @@
+ #include "mtk_drm_drv.h"
+ #include "mtk_plane.h"
+ 
++/* The resizer upscales up to 8x, from lines no wider than its buffer */
++#define MTK_PLANE_MIN_SCALE	(DRM_PLANE_NO_SCALING / 8)
++#define MTK_RSZ_MAX_WIDTH	1080
++
+ #define MTK_AFBC_MOD DRM_FORMAT_MOD_ARM_AFBC(AFBC_FORMAT_MOD_BLOCK_SIZE_32x8 | \
+ 					     AFBC_FORMAT_MOD_SPLIT | \
+ 					     AFBC_FORMAT_MOD_SPARSE)
+@@ -114,6 +118,9 @@ static int mtk_plane_atomic_async_check(struct drm_pla
+ 	if (plane != new_plane_state->crtc->cursor)
+ 		return -EINVAL;
+ 
++	if (mtk_plane_state_scaled(new_plane_state->crtc->primary->state))
++		return -EINVAL;
++
+ 	if (!plane->state)
+ 		return -EINVAL;
+ 
+@@ -191,8 +198,13 @@ static void mtk_plane_update_new_state(struct drm_plan
+ 	mtk_plane_state->pending.y = new_state->dst.y1;
+ 	mtk_plane_state->pending.src_x = new_state->src.x1 >> 16;
+ 	mtk_plane_state->pending.src_y = new_state->src.y1 >> 16;
+-	mtk_plane_state->pending.width = drm_rect_width(&new_state->dst);
+-	mtk_plane_state->pending.height = drm_rect_height(&new_state->dst);
++	if (mtk_plane_state_scaled(new_state)) {
++		mtk_plane_state->pending.width = new_state->src_w >> 16;
++		mtk_plane_state->pending.height = new_state->src_h >> 16;
++	} else {
++		mtk_plane_state->pending.width = drm_rect_width(&new_state->dst);
++		mtk_plane_state->pending.height = drm_rect_height(&new_state->dst);
++	}
+ 	mtk_plane_state->pending.rotation = new_state->rotation;
+ 	mtk_plane_state->pending.color_encoding = new_state->color_encoding;
+ }
+@@ -239,6 +251,7 @@ static int mtk_plane_atomic_check(struct drm_plane *pl
+ 										 plane);
+ 	struct drm_framebuffer *fb = new_plane_state->fb;
+ 	struct drm_crtc_state *crtc_state;
++	bool scale;
+ 	int ret;
+ 
+ 	if (!fb)
+@@ -263,11 +276,25 @@ static int mtk_plane_atomic_check(struct drm_plane *pl
+ 	if (IS_ERR(crtc_state))
+ 		return PTR_ERR(crtc_state);
+ 
+-	return drm_atomic_helper_check_plane_state(new_plane_state,
+-						   crtc_state,
+-						   DRM_PLANE_NO_SCALING,
+-						   DRM_PLANE_NO_SCALING,
+-						   true, true);
++	scale = plane->type == DRM_PLANE_TYPE_PRIMARY &&
++		mtk_crtc_can_scale(new_plane_state->crtc);
++	ret = drm_atomic_helper_check_plane_state(new_plane_state, crtc_state,
++						  scale ? MTK_PLANE_MIN_SCALE :
++							  DRM_PLANE_NO_SCALING,
++						  DRM_PLANE_NO_SCALING, true, true);
++	if (ret || !new_plane_state->visible || !mtk_plane_state_scaled(new_plane_state))
++		return ret;
++
++	/* The resizer upscales the whole canvas: the plane must cover the CRTC */
++	if (new_plane_state->crtc_x || new_plane_state->crtc_y ||
++	    new_plane_state->crtc_w != crtc_state->mode.hdisplay ||
++	    new_plane_state->crtc_h != crtc_state->mode.vdisplay ||
++	    (new_plane_state->src_w | new_plane_state->src_h) & 0xffff ||
++	    new_plane_state->src_w >> 16 > MTK_RSZ_MAX_WIDTH ||
++	    new_plane_state->rotation != DRM_MODE_ROTATE_0)
++		return -EINVAL;
++
++	return 0;
+ }
+ 
+ static void mtk_plane_atomic_disable(struct drm_plane *plane,
+diff --git a/drivers/gpu/drm/mediatek/mtk_plane.h b/drivers/gpu/drm/mediatek/mtk_plane.h
+--- a/drivers/gpu/drm/mediatek/mtk_plane.h
++++ b/drivers/gpu/drm/mediatek/mtk_plane.h
+@@ -48,6 +48,12 @@ to_mtk_plane_state(struct drm_plane_state *state)
+ 	return container_of(state, struct mtk_plane_state, base);
+ }
+ 
++static inline bool mtk_plane_state_scaled(const struct drm_plane_state *state)
++{
++	return state->crtc_w != state->src_w >> 16 ||
++	       state->crtc_h != state->src_h >> 16;
++}
++
+ int mtk_plane_init(struct drm_device *dev, struct drm_plane *plane,
+ 		   unsigned long possible_crtcs, enum drm_plane_type type,
+ 		   unsigned int supported_rotations, const u32 blend_modes,

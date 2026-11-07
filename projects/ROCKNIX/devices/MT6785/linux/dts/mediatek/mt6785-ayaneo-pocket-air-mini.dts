@@ -1262,6 +1262,15 @@
 	remote-endpoint = <&dsi0_in>;
 };
 
+/* RSZ0 passes frames through 1:1 and upscales a scaled primary plane */
+&ovl_2l0_out {
+	remote-endpoint = <&rsz0_in>;
+};
+
+&rdma0_in {
+	remote-endpoint = <&rsz0_out>;
+};
+
 &dsi0 {
 	status = "okay";
 
@@ -1601,6 +1610,35 @@
 };
 
 &{/soc} {
+	disp_rsz0: rsz@1401a000 {
+		compatible = "mediatek,mt6785-disp-rsz";
+		reg = <0 0x1401a000 0 0x1000>;
+		clocks = <&mmsys CLK_MM_DISP_RSZ>;
+		power-domains = <&spm MT6785_POWER_DOMAIN_MM>;
+		mediatek,gce-client-reg = <&gce SUBSYS_1401XXXX 0xa000 0x1000>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				rsz0_in: endpoint {
+					remote-endpoint = <&ovl_2l0_out>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+
+				rsz0_out: endpoint {
+					remote-endpoint = <&rdma0_in>;
+				};
+			};
+		};
+	};
+
 	/* DVFSRC scales VCORE and DDR on its EMI monitor and the votes below, using LK's spmfw */
 	dvfsrc: system-controller@10012000 {
 		compatible = "mediatek,mt6785-dvfsrc";

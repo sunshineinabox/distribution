@@ -1,0 +1,14 @@
+#!/bin/sh
+
+# SPDX-License-Identifier: GPL-2.0
+# Copyright (C) 2026 ROCKNIX (https://github.com/ROCKNIX)
+
+. /etc/profile
+
+# DISP_RSZ0 only upscales, and sources wider than 1080 pixels fall back to GPU composition
+
+cat <<CFG >/storage/.config/profile.d/075-scanout-offload
+# Device Features
+DEVICE_SCANOUT_SCALING="true"
+DEVICE_SCANOUT_MAX_RENDER="100"
+CFG
