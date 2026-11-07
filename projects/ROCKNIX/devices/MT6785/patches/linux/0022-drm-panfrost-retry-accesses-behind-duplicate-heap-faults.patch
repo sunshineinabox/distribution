@@ -1,0 +1,25 @@
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sat, 7 Nov 2026 19:45:00 +0000
+Subject: [PATCH] drm/panfrost: retry accesses behind duplicate heap faults
+
+A second fault on a heap region that an earlier fault already mapped
+returns without an MMU command, so the access stays stalled until the
+job times out. Flush the region as the mapping did so the access
+retries, as kbase does with an UNLOCK.
+---
+ drivers/gpu/drm/panfrost/panfrost_mmu.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/gpu/drm/panfrost/panfrost_mmu.c b/drivers/gpu/drm/panfrost/panfrost_mmu.c
+--- a/drivers/gpu/drm/panfrost/panfrost_mmu.c
++++ b/drivers/gpu/drm/panfrost/panfrost_mmu.c
+@@ -649,7 +649,8 @@ static int panfrost_mmu_map_fault_addr(struct panfrost
+ 
+ 	sgt = &bo->sgts[page_offset / (SZ_2M / PAGE_SIZE)];
+ 	if (sgt->sgl) {
+-		/* Pages are already mapped, bail out. */
++		/* Mapped by an earlier fault, flush so the stalled access retries */
++		panfrost_mmu_flush_range(pfdev, bomapping->mmu, addr, SZ_2M);
+ 		goto out;
+ 	}
+ 
