@@ -1,0 +1,9 @@
+[Unit]
+Description=Mount the DSP and persist partitions for hexagonrpcd
+Requires=msm-firmware-loader.service
+After=msm-firmware-loader.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/msm-firmware-loader.sh hexagonrpc
