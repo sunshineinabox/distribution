@@ -24,6 +24,7 @@ makeinstall_target() {
     "SM6115")
       cp -a SM6115/* ${fw}
       rm -r ${fw}/qcom/sm6115/mangmi
+      rm ${fw}/aw88261_acf.bin
       ;;
     "SM8250")
       cp -a SM8250/* ${fw}
