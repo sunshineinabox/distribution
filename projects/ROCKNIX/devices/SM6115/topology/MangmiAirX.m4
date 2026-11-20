@@ -11,12 +11,12 @@ include(`audioreach/tokens.m4')
 # Stream SubGraphs
 #
 dnl Playback MultiMedia1
-STREAM_SG_PCM_ADD(audioreach/subgraph-stream-vol-playback.m4, FRONTEND_DAI_MULTIMEDIA1,
+STREAM_SG_PCM_ADD(audioreach/subgraph-stream-vol-pull-playback.m4, FRONTEND_DAI_MULTIMEDIA1,
 	`S16_LE', 48000, 48000, 2, 2,
 	0x00004001, 0x00004001, 0x00006001, `0')
 dnl
 dnl Playback MultiMedia2
-STREAM_SG_PCM_ADD(audioreach/subgraph-stream-vol-playback.m4, FRONTEND_DAI_MULTIMEDIA2,
+STREAM_SG_PCM_ADD(audioreach/subgraph-stream-vol-pull-playback.m4, FRONTEND_DAI_MULTIMEDIA2,
 	`S16_LE', 48000, 48000, 2, 2,
 	0x00004002, 0x00004002, 0x00006010, `0')
 dnl

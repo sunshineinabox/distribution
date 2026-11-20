@@ -188,7 +188,7 @@
 	};
 
 	sound {
-		compatible = "qcom,sm8450-sndcard";
+		compatible = "mangmi,air-x-sndcard", "qcom,sm8450-sndcard";
 		model = "MangmiAirX";
 
 		widgets = "Speaker", "SPK_L Speaker",

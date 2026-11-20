@@ -1,0 +1,63 @@
+From: Mohit Sharma <mohit.sharma@oss.qualcomm.com>
+Subject: [PATCH] soc: qcom: apr: publish the GPR callback before client probe
+
+2/2 of "Fix GPR callback registration race during probe":
+
+ 2/2 soc: qcom: apr: Publish GPR callback before client probe
+     <20261022144130.2443667-3-mohit.sharma@oss.qualcomm.com>
+
+A GPR service driver can issue synchronous commands from its probe path, but
+the bus only installed the service callback after probe returned. A response
+arriving in between found a NULL callback and was dropped, and the client timed
+out:
+
+  qcom-apm ... CMD timeout for [1001021] opcode
+
+This installs the callback before probe, clears it again if probe fails, and
+leaves APR clients as they were. That lets a callback run before the client has
+published its data, which 1/2 ("ASoC: qcom: q6apm: Guard callbacks until probe
+data is ready") makes safe: q6apm publishes its driver data last, and q6apm and
+q6prm ignore packets until it is there. q6apm and q6prm are the only GPR
+clients.
+
+7.3.5 bump: 1/2 landed alone, as stable 91b5278622fd (upstream ef7062864c05),
+and its q6apm/q6prm hunks are gone from this patch. This half needs 1/2 in the
+tree, and since 7.3.5 it always is.
+
+Fixes: ec1471a898cc ("soc: qcom: apr: Add GPR support")
+Cc: stable@vger.kernel.org
+Co-developed-by: Ajay Kumar Nandam <ajay.nandam@oss.qualcomm.com>
+Signed-off-by: Ajay Kumar Nandam <ajay.nandam@oss.qualcomm.com>
+Signed-off-by: Mohit Sharma <mohit.sharma@oss.qualcomm.com>
+---
+diff --git a/drivers/soc/qcom/apr.c b/drivers/soc/qcom/apr.c
+index ea7f83916..829e5c8fd 100644
+--- a/drivers/soc/qcom/apr.c
++++ b/drivers/soc/qcom/apr.c
+@@ -365,13 +365,24 @@ static int apr_device_probe(struct device *dev)
+ {
+ 	struct apr_device *adev = to_apr_device(dev);
+ 	struct apr_driver *adrv = to_apr_driver(dev->driver);
++	struct packet_router *apr = dev_get_drvdata(dev->parent);
+ 	int ret;
+ 
++	if (apr->type == PR_TYPE_GPR)
++		adev->svc.callback = adrv->gpr_callback;
++
+ 	ret = adrv->probe(adev);
+-	if (!ret)
++	if (ret) {
++		if (apr->type == PR_TYPE_GPR)
++			adev->svc.callback = NULL;
++
++		return ret;
++	}
++
++	if (apr->type != PR_TYPE_GPR)
+ 		adev->svc.callback = adrv->gpr_callback;
+ 
+-	return ret;
++	return 0;
+ }
+ 
+ static void apr_device_remove(struct device *dev)
