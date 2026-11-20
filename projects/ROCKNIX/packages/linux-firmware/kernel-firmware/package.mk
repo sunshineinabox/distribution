@@ -83,11 +83,6 @@ makeinstall_target() {
     done
   fi
 
-  # Sm8250 devices need slpi firmware set to the correct dir
-  if [ ${DEVICE} = "SM8250" ]; then
-   mv ${FW_TARGET_DIR}/qcom/sm8250/Thundercomm/RB5/* ${FW_TARGET_DIR}/qcom/sm8250/
-  fi
-
   # SDM845 devices need wlan firmware set to the correct dir
   if [ ${DEVICE} = "SDM845" ]; then
    cp -Lv ${FW_TARGET_DIR}/ath10k/WCN3990/hw1.0/wlanmdsp.mbn ${FW_TARGET_DIR}/qcom/sdm845/

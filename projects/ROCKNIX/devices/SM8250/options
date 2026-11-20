@@ -63,7 +63,7 @@
     FIRMWARE="extra-firmware"
 
   # Additional packages to install
-    ADDITIONAL_PACKAGES="gamepadcalibration inputplumber openabl"
+    ADDITIONAL_PACKAGES="gamepadcalibration inputplumber openabl msm-firmware-loader"
 
   # Debug tty path
     DEBUG_TTY="/dev/ttyMSM0"
