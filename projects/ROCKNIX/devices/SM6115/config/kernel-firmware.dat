@@ -1,8 +1,4 @@
 # SoC FW
-qcom/qrb4210/adsp.mbn
-qcom/qrb4210/adspr.jsn
-qcom/qrb4210/adsps.jsn
-qcom/qrb4210/adspua.jsn
 qcom/a630_sqe.fw
 
 # Venus
