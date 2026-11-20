@@ -1,0 +1,8 @@
+[Unit]
+Description=Report where this boot's firmware came from, once it has loaded
+
+[Timer]
+OnBootSec=90s
+
+[Install]
+WantedBy=timers.target

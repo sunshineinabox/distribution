@@ -1,0 +1,30 @@
+#!/bin/sh
+# Each firmware file loaded this boot: source, version string, hash; then failed loads.
+BASE=/run/msm-firmware-loader
+OVERRIDE=/usr/lib/msm-firmware-loader/override
+LOG="$(journalctl -b -k -o cat --no-pager)"
+
+report() {
+	echo "$LOG" | sed -n 's/.*Loading firmware from \(.*\)$/\1/p' | sort -u |
+		grep -vE '\.b[0-9]+$' | while read -r path
+	do
+		real="$(readlink -f "$path")"
+		case "$path" in
+			"$BASE"/target/*) name="${path#"$BASE"/target/}" ;;
+			*/lib/firmware/*) name="${path#*/lib/firmware/}" ;;
+			*) name="$path" ;;
+		esac
+		case "$real" in
+			"$BASE"/mnt/*) src="device:${real#"$BASE"/mnt/}" ;;
+			"$OVERRIDE"/*) src="override" ;;
+			*) src="image" ;;
+		esac
+		ver="$(grep -aoh 'QC_IMAGE_VERSION_STRING=[[:graph:]]*' "$real" "${real%.*}".b[0-9]* 2>/dev/null |
+			head -n1 | cut -d= -f2)"
+		printf '%-48s %-44s %-36s %s\n' "$name" "$src" "${ver:--}" "$(sha256sum "$real" | cut -c1-12)"
+	done
+	echo "$LOG" | sed -n 's/.*Direct firmware load for \(.*\) failed with error \(.*\)$/\1 MISSING (error \2)/p' |
+		sort -u
+}
+
+report | tee "$BASE/report"

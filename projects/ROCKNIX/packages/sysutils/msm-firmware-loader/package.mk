@@ -14,10 +14,12 @@ PKG_TOOLCHAIN="manual"
 makeinstall_target() {
   mkdir -p ${INSTALL}/usr/sbin
     install -m 0755 ${PKG_BUILD}/msm-firmware-loader.sh ${INSTALL}/usr/sbin
+    install -m 0755 ${PKG_DIR}/scripts/msm-firmware-loader-report ${INSTALL}/usr/sbin
   mkdir -p ${INSTALL}/usr/lib/systemd/system
     cp -v ${PKG_BUILD}/msm-firmware-loader.service ${INSTALL}/usr/lib/systemd/system
 }
 
 post_install() {
   enable_service msm-firmware-loader.service
+  enable_service msm-firmware-loader-report.timer
 }

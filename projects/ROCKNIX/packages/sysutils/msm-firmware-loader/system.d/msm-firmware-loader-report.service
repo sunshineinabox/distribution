@@ -1,0 +1,7 @@
+[Unit]
+Description=Report where this boot's firmware came from
+After=msm-firmware-loader.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/msm-firmware-loader-report
