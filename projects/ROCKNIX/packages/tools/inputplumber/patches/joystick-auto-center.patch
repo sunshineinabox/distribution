@@ -1,0 +1,226 @@
+From 531999548cd1d3a6a8f053cd6508c3b26ea1ff21 Mon Sep 17 00:00:00 2001
+From: sunshineinabox <aqemail@gmail.com>
+Date: Sat, 21 Nov 2026 22:15:42 -0800
+Subject: [PATCH] feat(CapabilityMap): add auto_center option for evdev
+ joystick axes
+
+A stick whose resting reading is not the middle of its range drifts
+in one direction for as long as it is at rest.
+
+With `auto_center: true` on a joystick_x/joystick_y evdev mapping, the
+axis is normalized around its value when the device was opened instead.
+
+---
+ .../schema/capability_map_v2.json             |  5 ++
+ src/config/capability_map/evdev.rs            |  4 +
+ src/input/event/evdev.rs                      | 90 +++++++++++++++++++
+ src/input/event/evdev/translator.rs           | 29 ++++--
+ 4 files changed, 123 insertions(+), 5 deletions(-)
+
+diff --git a/rootfs/usr/share/inputplumber/schema/capability_map_v2.json b/rootfs/usr/share/inputplumber/schema/capability_map_v2.json
+index f7f3ddc..b60bc82 100644
+--- a/rootfs/usr/share/inputplumber/schema/capability_map_v2.json
++++ b/rootfs/usr/share/inputplumber/schema/capability_map_v2.json
+@@ -243,6 +243,11 @@
+       "description": "An [EvdevConfig] defines a matching evdev input event",
+       "type": "object",
+       "properties": {
++        "auto_center": {
++          "description": "If true, a joystick axis is centered on its value when the device was opened instead of the middle of its range.",
++          "type": "boolean",
++          "default": false
++        },
+         "axis_direction": {
+           "anyOf": [
+             {
+diff --git a/src/config/capability_map/evdev.rs b/src/config/capability_map/evdev.rs
+index 0526fb5..f76b239 100644
+--- a/src/config/capability_map/evdev.rs
++++ b/src/config/capability_map/evdev.rs
+@@ -14,6 +14,10 @@ pub struct EvdevConfig {
+     /// `1.0 - value`. For joystick axes (-1.0 to 1.0), this negates the value.
+     #[serde(default)]
+     pub invert: bool,
++    /// If true, a joystick axis is centered on its value when the device was
++    /// opened instead of the middle of its range.
++    #[serde(default)]
++    pub auto_center: bool,
+ }
+ 
+ #[derive(Debug, Deserialize, Serialize, Clone, JsonSchema, PartialEq)]
+diff --git a/src/input/event/evdev.rs b/src/input/event/evdev.rs
+index fe46059..2d18dfb 100644
+--- a/src/input/event/evdev.rs
++++ b/src/input/event/evdev.rs
+@@ -1051,6 +1051,38 @@ fn normalize_signed_value(raw_value: i32, min: i32, max: i32) -> f64 {
+     }
+ }
+ 
++/// How far from the middle of its range an axis may rest, as a share of half the
++/// range, for its value when the device was opened to be taken as its center.
++/// Farther than that, the stick was most likely held when the device was opened,
++/// and the middle of the range is used instead.
++const AUTO_CENTER_MAX_OFFSET: f64 = 0.25;
++
++/// Normalizes the given value into a range between -1.0 - 1.0 around the axis'
++/// resting position: its value in `info`, read when the device was opened, for
++/// sticks that do not rest in the middle of their range (uncalibrated ADC
++/// joysticks). Each side is scaled by its own distance from that position, so
++/// the stick still reaches -1.0 and 1.0 at the ends of its range. A resting value
++/// farther than [AUTO_CENTER_MAX_OFFSET] from the middle is not trusted: the
++/// middle is used, as without auto_center.
++fn normalize_centered_value(raw_value: i32, info: &AbsInfo) -> f64 {
++    let (min, max) = (info.minimum() as f64, info.maximum() as f64);
++    let mid = (min + max) / 2.0;
++    let half_range = (max - min) / 2.0;
++    if half_range <= 0.0 {
++        return 0.0;
++    }
++    let rest = info.value() as f64;
++    let center = if (rest - mid).abs() <= half_range * AUTO_CENTER_MAX_OFFSET {
++        rest
++    } else {
++        mid
++    };
++    let offset = raw_value as f64 - center;
++    // Never 0: the center is at least 3/4 of half the range from either end.
++    let reach = if offset >= 0.0 { max - center } else { center - min };
++    (offset / reach).clamp(-1.0, 1.0)
++}
++
+ /// Returns a value between 0.0 and 1.0 based on the given value with its
+ /// minimum and maximum.
+ fn normalize_unsigned_value(raw_value: i32, min: i32, max: i32) -> f64 {
+@@ -1106,3 +1138,61 @@ enum AxisDirection {
+     Positive,
+     Negative,
+ }
++
++#[cfg(test)]
++mod auto_center_tests {
++    use super::{normalize_centered_value, AUTO_CENTER_MAX_OFFSET};
++    use evdev::AbsInfo;
++
++    fn axis(value: i32, min: i32, max: i32) -> AbsInfo {
++        AbsInfo::new(value, min, max, 0, 0, 0)
++    }
++
++    #[test]
++    fn rest_reads_zero() {
++        let info = axis(520, 98, 856);
++        assert_eq!(normalize_centered_value(520, &info), 0.0);
++    }
++
++    #[test]
++    fn both_sides_reach_full_deflection() {
++        // Rests 43 counts above the middle (477) of 98..856.
++        let info = axis(520, 98, 856);
++        assert_eq!(normalize_centered_value(856, &info), 1.0);
++        assert_eq!(normalize_centered_value(98, &info), -1.0);
++        let half_up = normalize_centered_value(520 + (856 - 520) / 2, &info);
++        let half_down = normalize_centered_value(520 - (520 - 98) / 2, &info);
++        assert!((half_up - 0.5).abs() < 0.01, "{half_up}");
++        assert!((half_down + 0.5).abs() < 0.01, "{half_down}");
++    }
++
++    #[test]
++    fn clamps_past_the_range() {
++        let info = axis(520, 98, 856);
++        assert_eq!(normalize_centered_value(1023, &info), 1.0);
++        assert_eq!(normalize_centered_value(0, &info), -1.0);
++    }
++
++    #[test]
++    fn a_stick_held_at_open_falls_back_to_the_middle() {
++        // 98..856: middle 477, half range 379; held near the top end.
++        let info = axis(800, 98, 856);
++        assert_eq!(normalize_centered_value(477, &info), 0.0);
++        let edge = 477.0 + 379.0 * AUTO_CENTER_MAX_OFFSET;
++        let trusted = axis(edge as i32, 98, 856);
++        assert_eq!(normalize_centered_value(edge as i32, &trusted), 0.0);
++    }
++
++    #[test]
++    fn inverted_and_signed_ranges() {
++        let info = axis(-100, -32768, 32767);
++        assert_eq!(normalize_centered_value(-100, &info), 0.0);
++        assert_eq!(normalize_centered_value(32767, &info), 1.0);
++        assert_eq!(normalize_centered_value(-32768, &info), -1.0);
++    }
++
++    #[test]
++    fn an_empty_range_is_zero() {
++        assert_eq!(normalize_centered_value(5, &axis(5, 5, 5)), 0.0);
++    }
++}
+diff --git a/src/input/event/evdev/translator.rs b/src/input/event/evdev/translator.rs
+index c48c939..e17dc1d 100644
+--- a/src/input/event/evdev/translator.rs
++++ b/src/input/event/evdev/translator.rs
+@@ -19,7 +19,7 @@ use crate::{
+     },
+ };
+ 
+-use super::{normalize_signed_value, normalize_unsigned_value};
++use super::{normalize_centered_value, normalize_signed_value, normalize_unsigned_value};
+ 
+ type EventType = u16;
+ type EventCode = u16;
+@@ -251,7 +251,12 @@ impl EventTranslator {
+             }
+ 
+             // Normalize the input value
+-            let value = self.get_input_value(event, &evdev_config.value_type, evdev_config.invert);
++            let value = self.get_input_value(
++                event,
++                &evdev_config.value_type,
++                evdev_config.invert,
++                evdev_config.auto_center,
++            );
+             log::trace!(
+                 "Translated value {:?} {} to {:?}",
+                 event.code(),
+@@ -447,8 +452,14 @@ impl EventTranslator {
+     }
+ 
+     /// Returns the normalized value of the event expressed as an [InputValue].
+-    fn get_input_value(&self, event: &InputEvent, value_type: &ValueType, inverted: bool) -> InputValue {
+-        let mut normal_value = self.get_normalized_value(event, value_type);
++    fn get_input_value(
++        &self,
++        event: &InputEvent,
++        value_type: &ValueType,
++        inverted: bool,
++        auto_center: bool,
++    ) -> InputValue {
++        let mut normal_value = self.get_normalized_value(event, value_type, auto_center);
+ 
+         if inverted {
+             normal_value = match value_type {
+@@ -494,7 +505,12 @@ impl EventTranslator {
+ 
+     /// Returns the normalized value of the event. This will be a value that
+     /// ranges from -1.0 to 1.0 or 0.0 to 1.0 based on the minimum and maximum values.
+-    pub fn get_normalized_value(&self, event: &InputEvent, value_type: &ValueType) -> f64 {
++    pub fn get_normalized_value(
++        &self,
++        event: &InputEvent,
++        value_type: &ValueType,
++        auto_center: bool,
++    ) -> f64 {
+         let raw_value = event.value();
+         if event.event_type() != evdev::EventType::ABSOLUTE {
+             return raw_value as f64;
+@@ -519,6 +535,9 @@ impl EventTranslator {
+                 }
+             }
+             ValueType::Trigger => normalize_unsigned_value(raw_value, info.minimum(), info.maximum()),
++            ValueType::JoystickX | ValueType::JoystickY if auto_center => {
++                normalize_centered_value(raw_value, info)
++            }
+             ValueType::JoystickX | ValueType::JoystickY => {
+                 normalize_signed_value(raw_value, info.minimum(), info.maximum())
+             }
+-- 
+2.55.0
+

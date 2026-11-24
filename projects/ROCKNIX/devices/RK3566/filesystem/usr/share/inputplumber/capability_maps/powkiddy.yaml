@@ -186,10 +186,12 @@ mapping:
           event_type: ABS
           event_code: ABS_X
           value_type: joystick_x
+          auto_center: true
       - evdev:
           event_type: ABS
           event_code: ABS_Y
           value_type: joystick_y
+          auto_center: true
           invert: true
     target_event:
       gamepad:
@@ -202,10 +204,12 @@ mapping:
           event_type: ABS
           event_code: ABS_RX
           value_type: joystick_x
+          auto_center: true
       - evdev:
           event_type: ABS
           event_code: ABS_RY
           value_type: joystick_y
+          auto_center: true
           invert: true
     target_event:
       gamepad:

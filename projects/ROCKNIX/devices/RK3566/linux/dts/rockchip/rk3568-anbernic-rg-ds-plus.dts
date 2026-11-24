@@ -41,7 +41,7 @@
 			reg = <0>;
 			abs-flat = <32>;
 			abs-fuzz = <32>;
-			abs-range = <940 15>;
+			abs-range = <856 98>;
 			linux,code = <ABS_X>;
 		};
 
@@ -49,7 +49,7 @@
 			reg = <1>;
 			abs-flat = <32>;
 			abs-fuzz = <32>;
-			abs-range = <15 940>;
+			abs-range = <98 856>;
 			linux,code = <ABS_Y>;
 		};
 	};
